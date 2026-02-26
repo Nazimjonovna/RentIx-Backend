@@ -1,0 +1,52 @@
+networks:
+  rentix-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+
+services:
+  db:
+    image: postgres:15
+    container_name: rentix_postgres
+    networks:
+      rentix-net:
+        ipv4_address: 172.18.0.11
+    environment:
+      POSTGRES_USER: rentixuser
+      POSTGRES_PASSWORD: rentixpass
+      POSTGRES_DB: rentixdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  web:
+    image: ghcr.io/nazimjonovna/rentix-backend:sha-28f66b5
+    container_name: rentix_web
+    networks:
+      rentix-net:
+        ipv4_address: 172.18.0.12
+    environment:
+      APP_MODE: both
+      DB_HOST: db
+      DB_NAME: rentixdb
+      POSTGRES_USER: rentixuser
+      POSTGRES_PASSWORD: rentixpass
+
+    env_file:
+      - .env
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backups:/backups   # Cron backup folder mapping
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:
