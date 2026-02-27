@@ -14,7 +14,7 @@ from .views import (
 
     # Order
     OrderPageView, OrderCreateView, GetOwnAllOrderView, OrderChangeView,
-    OrderStatusView,
+    OrderStatusView,GetCompanyAllOrderView, 
 
     # Car
     CarCreateView, AvailableCarsAPIView, GetAllCarView, CarCRUDView,
@@ -67,9 +67,10 @@ urlpatterns = [
     # 🔹 Orders
     path("orderpage/", OrderPageView.as_view(), name="orderpage"),
     path("create-order/", OrderCreateView.as_view(), name="create-order"),
-    path("orders/", GetOwnAllOrderView.as_view(), name="user-orders"),
+    path("orders/get/user/<int:pk>/", GetOwnAllOrderView.as_view(), name="user-orders"),
     path("order/<int:pk>/", OrderChangeView.as_view(), name="order-detail"),
     path("order-status/", OrderStatusView.as_view(), name="order-status"),
+    path("get/order/company/<int:pk>/", GetCompanyAllOrderView.as_view()),
 
     # 🔹 Cars
     path("create-car/", CarCreateView.as_view(), name="create-car"),

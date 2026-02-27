@@ -393,6 +393,8 @@ class UsersAllGetView(APIView):
 
 
 class OrderPageView(APIView): # user va company uchun alohida qilishim kerak
+    permission_classes = [AllowAny]
+
     @swagger_auto_schema(request_body=OrderPageSerializer, tags = ["Order"])
     def post(self, request, *args, **kwargs):
         user = request.user
@@ -417,7 +419,7 @@ class OrderPageView(APIView): # user va company uchun alohida qilishim kerak
 
 
 class OrderCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(request_body=OrderSerializer, tags=["Order"])
     def post(self, request):
@@ -444,20 +446,61 @@ class OrderCreateView(APIView):
 
 
 class GetOwnAllOrderView(APIView): # buni ham user va company uchun alohida qilishim kerak
-    permission_class = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     @swagger_auto_schema(tags = ["Order"])
-    def get_all(self, request, *args, **kwargs):
-        order = Order.objects.filter(user = request.user)
-        serializer = OrderSerializer(order, many = True)
-        return Response({
-            "orders":serializer.data,   
-            "status":status.HTTP_200_OK
-        })
+    def get(self, request, pk,  *args, **kwargs):
+        user = User.objects.filter(id = pk).first()
+        if user:
+            order = Order.objects.filter(user = user)
+            if order:
+                serializer = OrderSerializer(order, many = True)
+                return Response({
+                    "orders":serializer.data,   
+                    "status":status.HTTP_200_OK
+                })
+            else:
+                return Response({
+                    "detail":"Not found",
+                    "status": status.HTTP_404_NOT_FOUND
+                })
+        else:
+            return Response({
+                "detail":"Siz ro'yhatdan o'tmagansiz",
+                "status": status.HTTP_404_NOT_FOUND
+            })
+
+
+class GetCompanyAllOrderView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(tags=["Order"])
+    def get(self, request, pk, *args, **kwargs):
+        company = Company.objects.filter(id=pk).first()
+
+        if company:
+            orders = Order.objects.filter(company=company)
+
+            if orders.exists():
+                serializer = OrderSerializer(orders, many=True)
+                return Response({
+                    "orders": serializer.data,
+                    "status": status.HTTP_200_OK
+                })
+            else:
+                return Response({
+                    "detail": "Not found",
+                    "status": status.HTTP_404_NOT_FOUND
+                })
+        else:
+            return Response({
+                "detail": "Company not found",
+                "status": status.HTTP_404_NOT_FOUND
+            })
         
 
 class OrderChangeView(APIView): # buni ham user va company uchun alohida qilishim kerak
-    permission_class = [IsAuthenticated]
+    permission_class = [AllowAny]
 
     @swagger_auto_schema(request_body = OrderSerializer, tags = ["Order"])
     def patch(self, request, pk, *args, **kwargs):
