@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework import generics
 from django.shortcuts import redirect
 from django.apps import AppConfig
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, parsers
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -575,6 +575,7 @@ class OrderChangeView(APIView): # buni ham user va company uchun alohida qilishi
 # ============== CAR VIEWS ==============
 class CarCreateView(APIView):
     permission_classes = [IsAuthenticated]
+    # parser_classes = [parsers.MultiPartParser, parsers.File]
 
     @swagger_auto_schema(
         request_body=CarSerializer,
@@ -919,6 +920,26 @@ class CompanyWorkView(APIView):
             serializer.save(company=company)
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
+
+
+class GetFilialWorkdays(APIView):
+    permission_classess = [IsAuthenticated]
+
+    @swagger_auto_schema(tags=["WorkDay"],manual_parameters=[TRANSLATION_HEADER])
+    def get(self, request, pk, *args, **kwargs):
+        filial = Filial.objects.filter(id = pk).first()
+        if filial:
+            workdays = CompanyWorkDay.objects.filter(filial = filial).all()
+            serializer = CompanyWorkDaySerializer(workdays, many = True)
+            return Response({
+                "data":serializer.data,
+                "status": status.HTTP_200_OK
+            })
+        else:
+            return Response({
+                "data":"Bunday filial yoq",
+                "status":status.HTTP_404_NOT_FOUND
+            })
 
 
 class CompanyWorkDayCRUDView(APIView):

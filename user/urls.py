@@ -24,7 +24,7 @@ from .views import (
     # Admin & Manager
     CreateAdminView, CompanyWorkDayCRUDView, CreateManagerView, ManagerCRUDView,
     LoginView, GetAllManagerView,FilialView, FilialDetailView,AdminCRUDView,
-    CompanyWorkView,
+    CompanyWorkView,GetFilialWorkdays, 
 
     # Rate
     CreateRateView,
@@ -92,6 +92,7 @@ urlpatterns = [
     path("companies/<int:pk>/", AdminCRUDView.as_view(), name="create-admin"), 
     path("companies/<int:company_id>/workdays/", CompanyWorkView.as_view(), name="admin-crud"),  # list, create
     path("workdays/<int:pk>/", CompanyWorkDayCRUDView.as_view(), name="admin-crud"),
+    path("workdays/get/filial/<int:pk>/", GetFilialWorkdays.as_view()),
     path('create-manager/', CreateManagerView.as_view(), name="create-manager"),
     path('manager-crud/<int:pk>/', ManagerCRUDView.as_view(), name="manager-crud"),
     # path("company-login/", CompanyLoginView.as_view(), name="company-login"),

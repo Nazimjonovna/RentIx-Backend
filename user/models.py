@@ -292,14 +292,14 @@ class CompanyWorkDay(models.Model):
     class Meta:
         verbose_name = "Company Work Day"
         verbose_name_plural = "Company Work Days"
-        unique_together = ("company", "day")
+        unique_together = ("filial", "day")  
 
     def __str__(self):
         if self.is_24_7:
-            return f"{self.company.name} — {self.get_day_display()}: 24/7"
+            return f"{self.filial.name} — {self.get_day_display()}: 24/7"
         if not self.is_working:
-            return f"{self.company.name} — {self.get_day_display()}: Dam olish"
-        return f"{self.company.name} — {self.get_day_display()}: {self.start_time}–{self.end_time}"
+            return f"{self.filial.name} — {self.get_day_display()}: Dam olish"
+        return f"{self.filial.name} — {self.get_day_display()}: {self.start_time}–{self.end_time}"
 
 
 class User(AbstractUser):
