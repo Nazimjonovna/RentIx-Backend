@@ -85,7 +85,7 @@ def translate_text(text, dest_lang):
     try:
         return translator.translate(
             text,
-            src='auto',   # 🔥 MUHIM JOY
+            src='auto',   
             dest=dest_lang
         ).text
     except Exception as e:

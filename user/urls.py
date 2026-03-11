@@ -24,7 +24,7 @@ from .views import (
     # Admin & Manager
     CreateAdminView, CompanyWorkDayCRUDView, CreateManagerView, ManagerCRUDView,
     LoginView, GetAllManagerView,FilialView, FilialDetailView,AdminCRUDView,
-    CompanyWorkView,GetFilialWorkdays, 
+    CompanyWorkView,GetFilialWorkdays,GetCompaniView, 
 
     # Rate
     CreateRateView,
@@ -77,7 +77,7 @@ urlpatterns = [
     path("cars/", GetAllCarView.as_view(), name="get-all-cars"),
     path("car/<int:pk>/", CarCRUDView.as_view(), name="car-crud"),
     path("filter-car/", AvailableCarsAPIView.as_view(), name="filter-car"),
-     path("rates/", CarRateListCreateView.as_view(), name="car-rate-list-create"),
+    path("rates/", CarRateListCreateView.as_view(), name="car-rate-list-create"),
     path("rates/<int:pk>/", CarRateDetailView.as_view(), name="car-rate-detail"),
     path("filter-car-model/", AvailableCarModelFilterView.as_view(), name="filter-car-model"),
     path("filter-car-cost/", CarCostFilterAPIView.as_view(), name="filter-car-cost"),
@@ -95,11 +95,11 @@ urlpatterns = [
     path("workdays/get/filial/<int:pk>/", GetFilialWorkdays.as_view()),
     path('create-manager/', CreateManagerView.as_view(), name="create-manager"),
     path('manager-crud/<int:pk>/', ManagerCRUDView.as_view(), name="manager-crud"),
-    # path("company-login/", CompanyLoginView.as_view(), name="company-login"),
     path("login/", LoginView.as_view(), name="login"),
     path("managers/", GetAllManagerView.as_view(), name="all-managers"),
     path("filials/", FilialView.as_view(), name="filials"),
     path("filials/<int:pk>/", FilialDetailView.as_view(), name="filial-detail"),
+    path('company/get-id/', GetCompaniView.as_view()),
 
     # 🔹 Google OAuth
     path('api/auth/google/start/', GoogleRegisterView.as_view(), name='google-start'),

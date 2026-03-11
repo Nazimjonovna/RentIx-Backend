@@ -8,7 +8,7 @@ from django.apps import AppConfig
 from rest_framework import viewsets, permissions, parsers
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.parsers import MultiPartParser, FileUploadParser, FormParser, JSONParser
 from django.db.models import Sum
 from rest_framework import status
 from django.shortcuts import get_object_or_404
@@ -232,6 +232,7 @@ class ValidatedcodeView(APIView):
 class RegisterView(APIView):
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
+    parser_class = [MultiPartParser]
 
     @swagger_auto_schema(tags=['Register'], request_body=RegisterSerializer)
     def post(self, request, *args, **kwargs):
@@ -308,6 +309,8 @@ class RegisterView(APIView):
 
 
 class UserProfilView(APIView):
+    parser_classes = [MultiPartParser, FileUploadParser]
+    
     @swagger_auto_schema(tags = ["User"])
     def get(self, request, pk, *args, **kwargs):
         #user get ni qoshdim
@@ -394,6 +397,7 @@ class UsersAllGetView(APIView):
 
 class OrderPageView(APIView): # user va company uchun alohida qilishim kerak
     permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(request_body=OrderPageSerializer, tags = ["Order"])
     def post(self, request, *args, **kwargs):
@@ -420,6 +424,7 @@ class OrderPageView(APIView): # user va company uchun alohida qilishim kerak
 
 class OrderCreateView(APIView):
     permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(request_body=OrderSerializer, tags=["Order"])
     def post(self, request):
@@ -501,6 +506,7 @@ class GetCompanyAllOrderView(APIView):
 
 class OrderChangeView(APIView): # buni ham user va company uchun alohida qilishim kerak
     permission_class = [AllowAny]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(request_body = OrderSerializer, tags = ["Order"])
     def patch(self, request, pk, *args, **kwargs):
@@ -575,7 +581,7 @@ class OrderChangeView(APIView): # buni ham user va company uchun alohida qilishi
 # ============== CAR VIEWS ==============
 class CarCreateView(APIView):
     permission_classes = [IsAuthenticated]
-    # parser_classes = [parsers.MultiPartParser, parsers.File]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(
         request_body=CarSerializer,
@@ -627,6 +633,7 @@ class GetAllCarView(APIView):
 
 class CarCRUDView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(
         tags=["Car"],
@@ -747,6 +754,7 @@ class AvailableCarsAPIView(APIView):
 
 
 class AvailableCarModelFilterView(APIView):
+    
     def get(self, request):
         serializer = AvailableCarModelFilterSerializer(
             data=request.query_params
@@ -802,6 +810,7 @@ class CashbackTransactionViewSet(viewsets.ViewSet):
 # ============== COMPANY ADMIN VIEWS ==============
 class CreateAdminView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(
         request_body=CreateAdminSerializer,
@@ -824,6 +833,7 @@ class CreateAdminView(APIView):
 
 class AdminCRUDView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(
         tags=["Company (Admin CRUD)"],
@@ -1026,6 +1036,7 @@ class CompanyWorkDayCRUDView(APIView):
 # ============== MANAGER VIEWS ==============
 class CreateManagerView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(
         request_body=ManagerSerializer,
@@ -1057,53 +1068,6 @@ class CreateManagerView(APIView):
                 'status': status.HTTP_400_BAD_REQUEST
             })
 
-
-# class LoginView(APIView):
-#     permission_classes = [AllowAny]
-
-#     @swagger_auto_schema(
-#         request_body=LoginSerializer,
-#         tags=["Login"]
-#     )
-#     def post(self, request, *args, **kwargs):
-#         serializer = LoginSerializer(data=request.data)
-#         serializer.is_valid(raise_exception=True)
-
-#         login = serializer.validated_data["login"]
-#         password = serializer.validated_data["password"]
-
-#         # 1️⃣ Manager ichidan qidiramiz
-#         manager = Manager.objects.filter(login=login, password=password).select_related("user").first()
-#         if manager:
-#             refresh = RefreshToken.for_user(manager.user)
-#             return Response({
-#                 "message": "Login muvaffaqiyatli (Manager)",
-#                 "access": str(refresh.access_token),
-#                 "refresh": str(refresh),
-#                 "user": {
-#                     "id": manager.id,
-#                     "role": "manager"
-#                 }
-#             }, status=status.HTTP_200_OK)
-
-#         # 2️⃣ Company ichidan qidiramiz
-#         company = Company.objects.filter(login=login, password=password).select_related("owner").first()
-#         if company:
-#             refresh = RefreshToken.for_user(company.owner)
-#             return Response({
-#                 "message": "Login muvaffaqiyatli (Admin)",
-#                 "access": str(refresh.access_token),
-#                 "refresh": str(refresh),
-#                 "user": {
-#                     "id": company.owner.id,
-#                     "role": "admin"
-#                 }
-#             }, status=status.HTTP_200_OK)
-
-#         # 3️⃣ Hech qayerdan topilmadi
-#         return Response({
-#             "message": "Login yoki parol noto'g'ri"
-#         }, status=status.HTTP_401_UNAUTHORIZED)
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
@@ -1172,6 +1136,7 @@ class LoginView(APIView):
 
 class ManagerCRUDView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(
         tags=["Manager"],
@@ -1499,32 +1464,42 @@ class NotificationViewSet(viewsets.ModelViewSet):
         notif.save(update_fields=['is_read'])
         return Response({'status': 'notification marked as read'}, status=status.HTTP_200_OK)
     
-
+    
 class GetUserTokenView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(request_body = UserTokenRequestSerializer, tags=['Register'])
+    @swagger_auto_schema(request_body=UserTokenRequestSerializer, tags=['Register'])
     def post(self, request, *args, **kwargs):
         phone = request.data.get("phone")
         telegram_id = request.data.get("telegram_id")
 
-        if not phone or not telegram_id:
+        # Ikkalasi ham bo'lmasa xatolik qaytarish
+        if not phone and not telegram_id:
             return Response({
                 "status": False,
-                "detail": _("phone va telegram_id majburiy!")
+                "detail": _("phone yoki telegram_id majburiy!")
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            user = User.objects.filter(phone=phone, telegram_id=telegram_id).first()
-            print(user)
-            print(phone, telegram_id)
+            # Foydalanuvchini phone yoki telegram_id bo'yicha qidirish
+            # user = None
+            print(telegram_id, phone)
+            if telegram_id and phone:
+                user = User.objects.filter(phone=phone, telegram_id=telegram_id).first()
+            elif telegram_id:
+                user = User.objects.filter(telegram_id=telegram_id).first()
+            elif phone:
+                user = User.objects.filter(phone=phone).first()
+
             if not user:
                 return Response({
                     "status": False,
                     "detail": _("Bunday foydalanuvchi topilmadi.")
                 }, status=status.HTTP_404_NOT_FOUND)
+
             access_token = AccessToken.for_user(user)
             refresh_token = RefreshToken.for_user(user)
+
             return Response({
                 "status": True,
                 "message": _("Foydalanuvchi topildi."),
@@ -1540,6 +1515,7 @@ class GetUserTokenView(APIView):
                     "refresh": str(refresh_token),
                 }
             }, status=status.HTTP_200_OK)
+
         except Exception as e:
             print(f"❌ GetUserTokenView error: {e}")
             return Response({
@@ -1547,6 +1523,52 @@ class GetUserTokenView(APIView):
                 "detail": _("So'rovni bajarishda xatolik yuz berdi."),
                 "error": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# class GetUserTokenView(APIView):
+#     permission_classes = [AllowAny]
+
+#     @swagger_auto_schema(request_body = UserTokenRequestSerializer, tags=['Register'])
+#     def post(self, request, *args, **kwargs):
+#         phone = request.data.get("phone")
+#         telegram_id = request.data.get("telegram_id")
+#         if not phone or not telegram_id:
+#             return Response({
+#                 "status": False,
+#                 "detail": _("phone va telegram_id majburiy!")
+#             }, status=status.HTTP_400_BAD_REQUEST)
+#         try:
+#             user = User.objects.filter(phone=phone, telegram_id=telegram_id).first()
+#             print(user)
+#             print(phone, telegram_id)
+#             if not user:
+#                 return Response({
+#                     "status": False,
+#                     "detail": _("Bunday foydalanuvchi topilmadi.")
+#                 }, status=status.HTTP_404_NOT_FOUND)
+#             access_token = AccessToken.for_user(user)
+#             refresh_token = RefreshToken.for_user(user)
+#             return Response({
+#                 "status": True,
+#                 "message": _("Foydalanuvchi topildi."),
+#                 "user": {
+#                     "id": user.id,
+#                     "phone": user.phone,
+#                     "role": user.role,
+#                     "full_name": user.full_name,
+#                     "telegram_id": user.telegram_id,
+#                 },
+#                 "tokens": {
+#                     "access": str(access_token),
+#                     "refresh": str(refresh_token),
+#                 }
+#             }, status=status.HTTP_200_OK)
+#         except Exception as e:
+#             print(f"❌ GetUserTokenView error: {e}")
+#             return Response({
+#                 "status": False,
+#                 "detail": _("So'rovni bajarishda xatolik yuz berdi."),
+#                 "error": str(e)
+#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CarRateListCreateView(generics.ListCreateAPIView):
@@ -1925,6 +1947,7 @@ class CheckInOutViewSet(viewsets.ModelViewSet):
     queryset = ChekInOut.objects.all()
     serializer_class = CheckInOutSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
 
     def perform_create(self, serializer):
         """
@@ -2137,7 +2160,7 @@ class FilialDetailView(APIView):
     
 
 class CarImageAPIView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = [MultiPartParser, FileUploadParser]
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -2201,7 +2224,7 @@ class CarImageAPIView(APIView):
 
 
 class CarImageDetailAPIView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = [MultiPartParser, FileUploadParser]
     permission_classes = [AllowAny]
 
     def get_object(self, pk):
@@ -2310,3 +2333,23 @@ class ViloyatlarViewSet(ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         self._check_role(request)
         return super().destroy(request, *args, **kwargs)
+    
+
+class GetCompaniView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FileUploadParser]
+    
+    @swagger_auto_schema(tag = 'Company')
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        if user.role in ['admin', 'manager']:
+            company = Company.objects.filter(owner = user).first()
+            return Response({
+                "company_id":company.id,
+                "status":status.HTTP_200_OK
+            })
+        else:
+            return Response({
+                "data":"Siz admin emassiz",
+                "status":status.HTTP_200_OK
+            })
