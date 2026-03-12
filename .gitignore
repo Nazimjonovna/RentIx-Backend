@@ -38,6 +38,7 @@ media/
 staticfiles/
 static_root/
 local_settings.py
+.env
 
 # Django migrations
 */migrations/*.py
