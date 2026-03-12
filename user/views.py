@@ -731,7 +731,8 @@ class CarCRUDView(APIView):
 
 class AvailableCarsAPIView(APIView):
 
-    def get(self, request):
+    @swagger_auto_schema(request_body=AvailableCarTimeFilterSerializer, tag = ['Filtercars'])
+    def post(self, request):
         serializer = AvailableCarTimeFilterSerializer(
             data=request.query_params
         )
@@ -755,7 +756,8 @@ class AvailableCarsAPIView(APIView):
 
 class AvailableCarModelFilterView(APIView):
     
-    def get(self, request):
+    @swagger_auto_schema(request_body=AvailableCarModelFilterSerializer, tag = ["Filtercars"])
+    def post(self, request):
         serializer = AvailableCarModelFilterSerializer(
             data=request.query_params
         )

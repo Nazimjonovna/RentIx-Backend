@@ -164,23 +164,24 @@ class OrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = (
-            "id",
-            "user",
-            "company",
-            "manager",
-            "car",
-            "start_time",
-            "end_time",
-            "location_from",
-            "location_to",
-            "airport_VIP",
-            "is_driver",
-            "use_cashback",
-            "status",
-            "payment_system",
-            "cost",  # read-only
-        )
+        fields = "__all__"
+        # (
+        #     "id",
+        #     "user",
+        #     "company",
+        #     "manager",
+        #     "car",
+        #     "start_time",
+        #     "end_time",
+        #     "location_from",
+        #     "location_to",
+        #     "airport_VIP",
+        #     "is_driver",
+        #     "use_cashback",
+        #     "status",
+        #     "payment_system",
+        #     "cost",  # read-only
+        # )
         read_only_fields = ("user", "cost")
 
     def get_cost(self, obj):
@@ -207,29 +208,30 @@ class CarSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Car
-        fields = (
-            "id",
-            "company",
-            "car_model",
-            "car_name",
-            "car_name_ru",
-            "car_name_en",
-            "car_number",
-            "car_color",
-            "car_image",
-            "car_image_logo",
-            "car_image_portfolio",
-            "tex_pasport",
-            "commit",
-            "commit_ru",
-            "commit_en",
-            "created",
-            "updated",
-            "car_image_logo_url",
-            "car_image_portfolio_url",
-            "tex_pasport_url",
-            "logo_url",
-        )
+        fields = "__all__"
+        # fields = (
+        #     "id",
+        #     "company",
+        #     "car_model",
+        #     "car_name",
+        #     "car_name_ru",
+        #     "car_name_en",
+        #     "car_number",
+        #     "car_color",
+        #     "car_image",
+        #     "car_image_logo",
+        #     "car_image_portfolio",
+        #     "tex_pasport",
+        #     "commit",
+        #     "commit_ru",
+        #     "commit_en",
+        #     "created",
+        #     "updated",
+        #     "car_image_logo_url",
+        #     "car_image_portfolio_url",
+        #     "tex_pasport_url",
+        #     "logo_url",
+        # )
         read_only_fields = ['id', 'created', 'updated', 'car_name_ru', 'car_name_en', 'commit_ru', 'commit_en']
 
     def get_car_image_logo_url(self, obj):
