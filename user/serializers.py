@@ -878,3 +878,12 @@ class ViloyatlarSerializer(serializers.ModelSerializer):
             'cost_hour',
         )
         read_only_fields = ('id',)
+        
+        
+class CarModelPortfolioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Car
+        fields = [
+            "car_model",
+            "car_image_portfolio"
+        ]

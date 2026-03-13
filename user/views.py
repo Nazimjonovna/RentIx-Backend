@@ -48,7 +48,7 @@ from .serializers import (
     AvailableCarCostFilterSerializer, CashbackTransactionSerializer,ClickUzSerializer,
     OrderStatusSerializer,BlockUserSerializer,DiscountSerializer,
     CheckInOutSerializer, ImagesCheckOutSerializer, ImagesCheckInSerializer,
-    FilialSerializer, ViloyatlarSerializer,
+    FilialSerializer, ViloyatlarSerializer,CarModelPortfolioSerializer,
 )
 from .utils.logger import logged
 from drf_yasg import openapi
@@ -2355,3 +2355,17 @@ class GetCompaniView(APIView):
                 "data":"Siz admin emassiz",
                 "status":status.HTTP_200_OK
             })
+            
+            
+class GetCarModelView(APIView):
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FileUploadParser]
+    
+    @swagger_auto_schema(tag = ['Filter-car'])
+    def get(self, request, *args, **kwargs):
+        rdata = Car.objects.all()
+        serializer = CarModelPortfolioSerializer(rdata, many = True)
+        return Response({
+            "data":serializer.data,
+            "status":status.HTTP_200_OK
+        })

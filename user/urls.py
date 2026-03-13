@@ -20,6 +20,7 @@ from .views import (
     CarCreateView, AvailableCarsAPIView, GetAllCarView, CarCRUDView,
     AvailableCarModelFilterView, CarCostFilterAPIView,DiscountView,
     GetAllCarView,CarImageAPIView,CarImageDetailAPIView,ViloyatlarViewSet,
+    GetCarModelView,
 
     # Admin & Manager
     CreateAdminView, CompanyWorkDayCRUDView, CreateManagerView, ManagerCRUDView,
@@ -86,6 +87,7 @@ urlpatterns = [
     path("car-images/<int:pk>/", CarImageDetailAPIView.as_view(), name="car-image-detail"),
     path("viloyatlar/", ViloyatlarViewSet.as_view({'get': 'list', 'post': 'create'}), name="viloyatlar"),
     path("viloyatlar/<int:pk>/", ViloyatlarViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name="viloyat-detail"),
+    path("get/model/portfolio/cars/", GetCarModelView.as_view()),
 
     # 🔹 Admin & Manager
     path("companies/", CreateAdminView.as_view(), name="create-admin"), 
