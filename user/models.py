@@ -627,39 +627,29 @@ class Order(models.Model):
         Order vaqtini CompanyWorkDay bilan tekshiradi
         Agar workday topilmasa -> 24/7 deb qabul qilinadi
         """
-
         order_day = self.start_time.date()
-
         workday = CompanyWorkDay.objects.filter(
             company=self.company,
             day=order_day
         ).first()
-
         if not workday:
             return  # workday yo'q → 24/7 ishlaydi
-
         if workday.is_24_7:
             return  # 24/7
-
         if not workday.is_working:
             raise ValidationError("Bu kunda filial ishlamaydi")
-
         if not workday.start_time or not workday.end_time:
             return
-
         work_start = timezone.make_aware(
             datetime.combine(workday.day, workday.start_time)
         )
-
         work_end = timezone.make_aware(
             datetime.combine(workday.day, workday.end_time)
         )
-
         if self.start_time < work_start or self.start_time > work_end:
             raise ValidationError(
                 f"Order boshlanish vaqti ish vaqtidan tashqarida ({workday.start_time}-{workday.end_time})"
             )
-
         if self.end_time < work_start or self.end_time > work_end:
             raise ValidationError(
                 f"Order tugash vaqti ish vaqtidan tashqarida ({workday.start_time}-{workday.end_time})"
@@ -669,88 +659,58 @@ class Order(models.Model):
 
     def calculate_cost(self):
         """Order uchun umumiy narxni hisoblaydi"""
-
         car = self.car
         duration = self.end_time - self.start_time
-
         total_hours = duration.total_seconds() / 3600
         total_days = duration.days + (1 if duration.seconds > 0 else 0)
-
-        # Asosiy narx
         if car.cost_hour_tash and total_hours <= 24:
             base_cost = total_hours * car.cost_hour_tash
         else:
             base_cost = total_days * car.cost_day_tash
-
-        # Driver
         if self.is_driver:
             base_cost += car.cost_driver
-
-        # VIP
         if self.airport_VIP:
             base_cost += car.airport_VIP_cost
-
-        # Aksiya
         now = timezone.now()
         active_discounts = car.discounts.filter(
             is_active=True,
             diedline__gte=now.date()
         )
-
         if active_discounts.exists():
             discount = active_discounts.latest('created_at')
             base_cost = base_cost * (1 - discount.discount / 100)
-
-        # Cashback ishlatish
         if self.use_cashback:
-
             user_cashback = self.user.cashback_transactions.filter(
                 type="earn"
             ).aggregate(
                 total_earned=Sum("amount")
             )['total_earned'] or 0
-
             user_spent = self.user.cashback_transactions.filter(
                 type="spend"
             ).aggregate(
                 total_spent=Sum("amount")
             )['total_spent'] or 0
-
             available_cashback = user_cashback - user_spent
-
             if available_cashback > 0:
-
                 cashback_to_use = min(base_cost, available_cashback)
                 base_cost -= cashback_to_use
-
                 CashbackTransaction.objects.update_or_create(
                     user=self.user,
                     order=self,
                     type="spend",
                     defaults={"amount": cashback_to_use}
                 )
-
         return round(base_cost, 2)
 
     # ================= SAVE =================
 
     def save(self, *args, **kwargs):
-
-        # Workday validation
         self.full_clean()
-
-        # Cost hisoblash
         self.cost = self.calculate_cost()
-
         super().save(*args, **kwargs)
-
-        # Cashback earn
         if not self.use_cashback:
-
             cashback_amount = self.cost * self.car.cashbeck / 100
-
             if cashback_amount > 0:
-
                 CashbackTransaction.objects.update_or_create(
                     user=self.user,
                     order=self,

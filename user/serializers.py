@@ -6,6 +6,7 @@ from datetime import timedelta
 from django.conf import settings
 from googletrans import Translator
 from django.utils import timezone
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .exceptions import IncorrectAmount, PerformTransactionDoesNotExist
 from django.contrib.auth import get_user_model
 from .translation_helper import AutoTranslateMixin
@@ -161,41 +162,46 @@ class OrderPageSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     cost = serializers.SerializerMethodField(read_only=True)
-
     class Meta:
         model = Order
         fields = "__all__"
-        # (
-        #     "id",
-        #     "user",
-        #     "company",
-        #     "manager",
-        #     "car",
-        #     "start_time",
-        #     "end_time",
-        #     "location_from",
-        #     "location_to",
-        #     "airport_VIP",
-        #     "is_driver",
-        #     "use_cashback",
-        #     "status",
-        #     "payment_system",
-        #     "cost",  # read-only
-        # )
         read_only_fields = ("user", "cost")
 
     def get_cost(self, obj):
         return obj.calculate_cost()
 
+    def validate(self, attrs):
+        """
+        Company ishlash vaqtini tekshiradi
+        Model clean() ni ishlatamiz
+        """
+        request = self.context.get("request")
+        user = request.user if request else None
+        order = Order(user=user, **attrs)
+        try:
+            order.clean()
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(
+                e.message_dict if hasattr(e, "message_dict") else e.messages
+            )
+        return attrs
+
     def create(self, validated_data):
-        user = self.context['request'].user
-        order = Order.objects.create(user=user, **validated_data)
+        """
+        User ni requestdan olamiz
+        """
+        user = self.context["request"].user
+        order = Order(user=user, **validated_data)
+        order.save()  # save() ichida full_clean + cost calculation ishlaydi
         return order
 
     def update(self, instance, validated_data):
+        """
+        Update paytida ham workday validation ishlaydi
+        """
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        instance.save()  # calculate_cost va cashback ishlaydi
+        instance.save()  # save() ichida clean + calculate_cost ishlaydi
         return instance
 
 

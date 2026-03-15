@@ -426,194 +426,104 @@ class OrderPageView(APIView): # user va company uchun alohida qilishim kerak
 
 class OrderCreateView(APIView):
     permission_classes = [AllowAny]
-    parser_classes = [MultiPartParser, FileUploadParser]
 
     @swagger_auto_schema(request_body=OrderSerializer, tags=["Order"])
     def post(self, request):
         user = request.user
         if user.is_blocked:
-            return Response({
-                "detail": "Siz bloklanganingiz sababli buyurtmani o'zgartira olmaysiz."
-            }, status=status.HTTP_403_FORBIDDEN)
-        serializer = OrderSerializer(data=request.data)
-        if serializer.is_valid():
-            company = serializer.validated_data["company"]
-            start_time = serializer.validated_data["start_time"]
-            end_time = serializer.validated_data["end_time"]
-            if not is_within_work_hours(company, start_time, end_time):
-                return Response({
-                    "detail": "Bu vaqt kompaniya ish soatlariga to‘g‘ri kelmaydi."
-                }, status=status.HTTP_400_BAD_REQUEST)
-            serializer.save()
-            return Response({
-                "message": "Buyurtma muvaffaqiyatli yaratildi.",
-                "data": serializer.data
-            }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Siz bloklangansiz."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        serializer = OrderSerializer(
+            data=request.data,
+            context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        return Response(
+            {
+                "message": "Buyurtma muvaffaqiyatli yaratildi",
+                "data": OrderSerializer(order).data
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 
-class GetOwnAllOrderView(APIView): # buni ham user va company uchun alohida qilishim kerak
+class GetOwnAllOrderView(APIView):
     permission_classes = [AllowAny]
-    
-    @swagger_auto_schema(tags = ["Order"])
-    def get(self, request, pk,  *args, **kwargs):
-        user = User.objects.filter(id = pk).first()
-        if user:
-            order = Order.objects.filter(user = user)
-            if order:
-                serializer = OrderSerializer(order, many = True)
-                return Response({
-                    "orders":serializer.data,   
-                    "status":status.HTTP_200_OK
-                })
-            else:
-                return Response({
-                    "detail":"Not found",
-                    "status": status.HTTP_404_NOT_FOUND
-                })
-        else:
-            return Response({
-                "detail":"Siz ro'yhatdan o'tmagansiz",
-                "status": status.HTTP_404_NOT_FOUND
-            })
+
+    @swagger_auto_schema(tags=["Order"])
+    def get(self, request, pk):
+        user = get_object_or_404(User, id=pk)
+        orders = Order.objects.filter(user=user)
+        serializer = OrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class GetCompanyAllOrderView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(tags=["Order"])
-    def get(self, request, pk, *args, **kwargs):
-        company = Company.objects.filter(id=pk).first()
-
-        if company:
-            orders = Order.objects.filter(company=company)
-
-            if orders.exists():
-                serializer = OrderSerializer(orders, many=True)
-                return Response({
-                    "orders": serializer.data,
-                    "status": status.HTTP_200_OK
-                })
-            else:
-                return Response({
-                    "detail": "Not found",
-                    "status": status.HTTP_404_NOT_FOUND
-                })
-        else:
-            return Response({
-                "detail": "Company not found",
-                "status": status.HTTP_404_NOT_FOUND
-            })
+    def get(self, request, pk):
+        company = get_object_or_404(Company, id=pk)
+        orders = Order.objects.filter(company=company)
+        serializer = OrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
         
 
-class OrderChangeView(APIView): # buni ham user va company uchun alohida qilishim kerak
-    permission_class = [AllowAny]
-    parser_classes = [MultiPartParser, FileUploadParser]
+class OrderChangeView(APIView):
+    permission_classes = [AllowAny]
 
-    @swagger_auto_schema(request_body = OrderSerializer, tags = ["Order"])
-    def patch(self, request, pk, *args, **kwargs):
-        order = Order.objects.filter(id = pk)
-        user = request.user
-        if user.is_blocked:
-            return Response({
-                "detail": "Siz bloklanganingiz sababli buyurtmani o'zgartira olmaysiz."
-            }, status=status.HTTP_403_FORBIDDEN)
-        if order.exists():
-            serializer = OrderSerializer(instance = order, data = request.data, partial = True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response({
-                    "order":serializer.data,
-                    "status":status.HTTP_200_OK,
-                    'messege':"Order muvafaqiyatli o'zgrtirildi"
-                })
-            else:
-                return Response ({
-                    'error':serializer.errors,
-                    "message":"Bizga topshirgan ma'lumotlaringiz yetarli emas",
-                    'status':status.HTTP_200_OK
-                })
-        else:
-            return Response({
-                    'messege':"Bunday buyurtma topilmadi",
-                    'status':status.HTTP_200_OK
-            })
-        
-    @swagger_auto_schema(tags = ["Order"])
-    def delete(self, request, pk, *args, **kwargs):
-        order = Order.objects.filter(id = pk)
-        user = request.user
-        if user.is_blocked:
-            return Response({
-                "detail": "Siz bloklanganingiz sababli buyurtmani o'zgartira olmaysiz."
-            }, status=status.HTTP_403_FORBIDDEN)
-        if order.exists():
-            order.delete()
-            return Response({
-                "Message":"Buyurtma o'chirildi",
-                "status":status.HTTP_200_OK
-            })
-        else:
-            return Response({
-                "Message":"Bunday buyurtma topilmadi",
-                "status":status.HTTP_404_NOT_FOUND
-            })
-        
-    @swagger_auto_schema(tags = ["Order"])
-    def get(self, request, pk, *args, **kwargs):
-        order = Order.objects.filter(id = pk)
-        user = request.user
-        if user.is_blocked:
-            return Response({
-                "detail": "Siz bloklanganingiz sababli buyurtmani o'zgartira olmaysiz."
-            }, status=status.HTTP_403_FORBIDDEN)
-        if order.exists():
-            serializer = OrderSerializer(order)
-            return Response({
-                "order":serializer.data,
-                "status":status.HTTP_200_OK
-            })
-        else:
-            return Response({
-                "Message":"Bunday buyurtma topilmadi",
-                "status":status.HTTP_404_NOT_FOUND
-            })
+    def get_object(self, pk):
+        return get_object_or_404(Order, id=pk)
+
+    @swagger_auto_schema(tags=["Order"])
+    def get(self, request, pk):
+        order = self.get_object(pk)
+        serializer = OrderSerializer(order)
+        return Response(serializer.data)
 
 
-# # ============== CAR VIEWS ==============
-# class CarCreateView(APIView):
-#     permission_classes = [IsAuthenticated]
-#     parser_classes = [MultiPartParser, FileUploadParser]
+    @swagger_auto_schema(request_body=OrderSerializer, tags=["Order"])
+    def patch(self, request, pk):
+        if request.user.is_blocked:
+            return Response(
+                {"detail": "Siz bloklangansiz"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        order = self.get_object(pk)
+        serializer = OrderSerializer(
+            order,
+            data=request.data,
+            partial=True,
+            context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {
+                "message": "Order muvaffaqiyatli o'zgartirildi",
+                "data": serializer.data
+            }
+        )
 
-#     @swagger_auto_schema(
-#         request_body=CarSerializer,
-#         tags=["Car"],
-#         manual_parameters=[TRANSLATION_HEADER]
-#     )
-#     def post(self, request, *args, **kwargs):
-#         """Yangi mashina qo'shish"""
-#         user = request.user
-#         if user.role not in ["admin", "manager"]:
-#             return Response({
-#                 "message": "Sizda bunday ruxsat yo'q",
-#                 'status': status.HTTP_403_FORBIDDEN
-#             })
-        
-#         # MUHIM: context qo'shish
-#         serializer = CarSerializer(data=request.data, context={'request': request})
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response({
-#                 "Message": "Mashina muvafaqiyatli ravishda qo'shildi",
-#                 "data": serializer.data,
-#                 "status": status.HTTP_201_CREATED
-#             })
-#         else:
-#             return Response({
-#                 'error': serializer.errors,
-#                 "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
-#                 'status': status.HTTP_400_BAD_REQUEST
-#             })
+
+    @swagger_auto_schema(tags=["Order"])
+    def delete(self, request, pk):
+        if request.user.is_blocked:
+            return Response(
+                {"detail": "Siz bloklangansiz"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        order = self.get_object(pk)
+        order.delete()
+        return Response(
+            {"message": "Buyurtma o'chirildi"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+
 class GenerateUploadURL(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]  # MultiPartParser faylni yuborish uchun kerak
