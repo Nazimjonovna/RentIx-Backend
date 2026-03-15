@@ -1,6 +1,7 @@
 import requests
 import base64
 import binascii
+import boto3
 from rest_framework.decorators import action
 from rest_framework import generics
 from django.shortcuts import redirect
@@ -8,6 +9,7 @@ from django.apps import AppConfig
 from rest_framework import viewsets, permissions, parsers
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.generics import CreateAPIView
 from rest_framework.parsers import MultiPartParser, FileUploadParser, FormParser, JSONParser
 from django.db.models import Sum
 from rest_framework import status
@@ -578,13 +580,98 @@ class OrderChangeView(APIView): # buni ham user va company uchun alohida qilishi
             })
 
 
-# ============== CAR VIEWS ==============
-class CarCreateView(APIView):
+# # ============== CAR VIEWS ==============
+# class CarCreateView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     parser_classes = [MultiPartParser, FileUploadParser]
+
+#     @swagger_auto_schema(
+#         request_body=CarSerializer,
+#         tags=["Car"],
+#         manual_parameters=[TRANSLATION_HEADER]
+#     )
+#     def post(self, request, *args, **kwargs):
+#         """Yangi mashina qo'shish"""
+#         user = request.user
+#         if user.role not in ["admin", "manager"]:
+#             return Response({
+#                 "message": "Sizda bunday ruxsat yo'q",
+#                 'status': status.HTTP_403_FORBIDDEN
+#             })
+        
+#         # MUHIM: context qo'shish
+#         serializer = CarSerializer(data=request.data, context={'request': request})
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response({
+#                 "Message": "Mashina muvafaqiyatli ravishda qo'shildi",
+#                 "data": serializer.data,
+#                 "status": status.HTTP_201_CREATED
+#             })
+#         else:
+#             return Response({
+#                 'error': serializer.errors,
+#                 "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
+#                 'status': status.HTTP_400_BAD_REQUEST
+#             })
+class GenerateUploadURL(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FileUploadParser]
+    parser_classes = [MultiPartParser, FormParser]  # MultiPartParser faylni yuborish uchun kerak
 
     @swagger_auto_schema(
-        request_body=CarSerializer,
+        operation_description="Faylni yuklash uchun presigned URL olish",
+        manual_parameters=[
+            openapi.Parameter('file', openapi.IN_FORM, description="Yuklanadigan fayl", type=openapi.TYPE_FILE)
+        ],
+        responses={200: openapi.Response(
+            description="Fayl URL", schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT, properties={
+                    'upload_url': openapi.Schema(type=openapi.TYPE_STRING),
+                    'file_url': openapi.Schema(type=openapi.TYPE_STRING)
+                }
+            ))
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        """Faylni yuklash uchun presigned URL olish"""
+        file = request.FILES.get('file')
+        if not file:
+            return Response({"message": "Fayl mavjud emas.", "status": 400})
+
+        file_name = file.name
+        file_key = f"car_images/{file_name}"
+        
+        # Boto3 client
+        client = boto3.client(
+            's3',
+            region_name=settings.AWS_S3_REGION_NAME,
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+        )
+
+        # Presigned URL olish
+        url = client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                'Key': file_key,
+                'ACL': 'public-read'
+            },
+            ExpiresIn=3600
+        )
+
+        return Response({
+            'upload_url': url,
+            'file_url': f"{settings.MEDIA_URL}{file_key}"
+        })
+
+
+class CarCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @swagger_auto_schema(
         tags=["Car"],
         manual_parameters=[TRANSLATION_HEADER]
     )
@@ -596,11 +683,38 @@ class CarCreateView(APIView):
                 "message": "Sizda bunday ruxsat yo'q",
                 'status': status.HTTP_403_FORBIDDEN
             })
-        
-        # MUHIM: context qo'shish
+
+        # Fayl nomlarini olish
+        car_image_logo = request.FILES.get('car_image_logo')
+        car_image_portfolio = request.FILES.get('car_image_portfolio')
+        tex_pasport = request.FILES.get('tex_pasport')
+
+        # Fayllar uchun URL olish
+        file_urls = {}
+
+        if car_image_logo:
+            file_urls['car_image_logo'] = self.get_presigned_url(car_image_logo.name)
+        if car_image_portfolio:
+            file_urls['car_image_portfolio'] = self.get_presigned_url(car_image_portfolio.name)
+        if tex_pasport:
+            file_urls['tex_pasport'] = self.get_presigned_url(tex_pasport.name)
+
+        # Serializerdan foydalanish
         serializer = CarSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
+            car = serializer.save()
+
+            # Fayl URL'larini saqlash
+            if 'car_image_logo' in file_urls:
+                car.car_image_logo = file_urls['car_image_logo']['file_url']
+            if 'car_image_portfolio' in file_urls:
+                car.car_image_portfolio = file_urls['car_image_portfolio']['file_url']
+            if 'tex_pasport' in file_urls:
+                car.tex_pasport = file_urls['tex_pasport']['file_url']
+
+            # Fayllarni saqlash
+            car.save()
+
             return Response({
                 "Message": "Mashina muvafaqiyatli ravishda qo'shildi",
                 "data": serializer.data,
@@ -612,6 +726,31 @@ class CarCreateView(APIView):
                 "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
                 'status': status.HTTP_400_BAD_REQUEST
             })
+
+    def get_presigned_url(self, file_name):
+        """Presigned URL yaratish"""
+        session = boto3.session.Session()
+        client = session.client(
+            "s3",
+            region_name=settings.AWS_S3_REGION_NAME,
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+        file_key = f"car_images/{file_name}"
+        url = client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
+                "Key": file_key,
+                "ACL": "public-read"
+            },
+            ExpiresIn=3600  # 1 soatlik URL
+        )
+        return {
+            "upload_url": url,
+            "file_url": f"{settings.MEDIA_URL}{file_key}"
+        }
 
 
 class GetAllCarView(APIView):
@@ -1397,10 +1536,8 @@ class ChatViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-
         if getattr(self, 'swagger_fake_view', False) or not user.is_authenticated:
             return Chat.objects.none()
-
         if user.is_staff or user.is_superuser:
             return Chat.objects.all()
         return Chat.objects.filter(user=user)

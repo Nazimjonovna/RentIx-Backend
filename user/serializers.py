@@ -201,59 +201,33 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class CarSerializer(serializers.ModelSerializer):
+    # Fayllar uchun URL'lar
     car_image_logo_url = serializers.SerializerMethodField()
     car_image_portfolio_url = serializers.SerializerMethodField()
     tex_pasport_url = serializers.SerializerMethodField()
-    logo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Car
         fields = "__all__"
-        # fields = (
-        #     "id",
-        #     "company",
-        #     "car_model",
-        #     "car_name",
-        #     "car_name_ru",
-        #     "car_name_en",
-        #     "car_number",
-        #     "car_color",
-        #     "car_image",
-        #     "car_image_logo",
-        #     "car_image_portfolio",
-        #     "tex_pasport",
-        #     "commit",
-        #     "commit_ru",
-        #     "commit_en",
-        #     "created",
-        #     "updated",
-        #     "car_image_logo_url",
-        #     "car_image_portfolio_url",
-        #     "tex_pasport_url",
-        #     "logo_url",
-        # )
         read_only_fields = ['id', 'created', 'updated', 'car_name_ru', 'car_name_en', 'commit_ru', 'commit_en']
 
+    # car_image_logo URL'sini olish uchun metod
     def get_car_image_logo_url(self, obj):
         if obj.car_image_logo:
-            request = self.context.get("request")
-            return request.build_absolute_uri(obj.car_image_logo.url) if request else obj.car_image_logo.url
+            return obj.car_image_logo  # URL'ni to'g'ridan-to'g'ri qaytaramiz
         return None
 
+    # car_image_portfolio URL'sini olish uchun metod
     def get_car_image_portfolio_url(self, obj):
         if obj.car_image_portfolio:
-            request = self.context.get("request")
-            return request.build_absolute_uri(obj.car_image_portfolio.url) if request else obj.car_image_portfolio.url
+            return obj.car_image_portfolio  # URL'ni to'g'ridan-to'g'ri qaytaramiz
         return None
 
+    # tex_pasport URL'sini olish uchun metod
     def get_tex_pasport_url(self, obj):
         if obj.tex_pasport:
-            request = self.context.get("request")
-            return request.build_absolute_uri(obj.tex_pasport.url) if request else obj.tex_pasport.url
+            return obj.tex_pasport  # URL'ni to'g'ridan-to'g'ri qaytaramiz
         return None
-
-    def get_logo_url(self, obj):
-        return obj.get_logo_url()
 
 
 class AvailableCarTimeFilterSerializer(serializers.Serializer):
@@ -469,12 +443,19 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "sender_name",
             "message",
             "created_at",
+            'file',
         )
         read_only_fields = (
             "id",
             "created_at",
             "sender_name",
         )
+        
+        def get_file_url(self, obj):
+            if obj.file:
+                request = self.context.get("request")
+                return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+            return None
 
 
 class ChatSerializer(serializers.ModelSerializer):

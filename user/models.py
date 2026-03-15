@@ -1,12 +1,14 @@
 from datetime import timedelta
 from django.db import models
 from django.conf import settings
-from django.db.models import Avg
+from django.db.models import Avg, Sum
 from django.utils import timezone
+from datetime import datetime
 from django.templatetags.static import static
 from django.core.validators import RegexValidator
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.exceptions import ValidationError
 
 MODEL = [
     ("chevrolet_cobalt", "Chevrolet Cobalt"),
@@ -272,18 +274,9 @@ class Filial(models.Model):
 
 # Har bir kompaniya uchun haftalik ish jadvali
 class CompanyWorkDay(models.Model):
-    DAYS = [
-        ("mon", "Dushanba"),
-        ("tue", "Seshanba"),
-        ("wed", "Chorshanba"),
-        ("thu", "Payshanba"),
-        ("fri", "Juma"),
-        ("sat", "Shanba"),
-        ("sun", "Yakshanba"),
-    ]
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="work_days")
     filial = models.ForeignKey(Filial, on_delete=models.CASCADE, related_name="work_days")
-    day = models.CharField(max_length=10, choices=DAYS)
+    day = models.DateField()
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
     is_working = models.BooleanField(default=True)
@@ -293,6 +286,18 @@ class CompanyWorkDay(models.Model):
         verbose_name = "Company Work Day"
         verbose_name_plural = "Company Work Days"
         unique_together = ("filial", "day")  
+
+    def clean(self):
+        # 24/7 bo'lsa start_time va end_time bo'lmasligi kerak
+        if self.is_24_7 and (self.start_time or self.end_time):
+            raise ValidationError("24/7 bo'lsa vaqt kiritilmasligi kerak")
+        # Ish kuni va 24/7 bo'lmasa start_time va end_time bo'lishi kerak
+        if self.is_working and not self.is_24_7:
+            if not self.start_time or not self.end_time:
+                raise ValidationError("Ish kuni bo'lsa start va end time bo'lishi kerak")
+        # Eski sanalarni saqlashni oldini olish
+        if self.day < timezone.now().date():
+            raise ValidationError("Sana bugungi kundan oldin bo'lishi mumkin emas")
 
     def __str__(self):
         if self.is_24_7:
@@ -476,120 +481,68 @@ class Viloyatlar(models.Model):
 
 class Car(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="cars")
-
     car_color = models.CharField(choices=COLOR, max_length=500)
-
     is_auto = models.BooleanField(default=True)
-
     fuel = models.CharField(max_length=200, choices=Fuel)
-
     fuel_cons = models.FloatField(default=0)
-
     sit_number = models.IntegerField(default=0)
-
     baggage = models.IntegerField(default=0)
-
     transmission = models.BooleanField(default=False)
-
     speed = models.IntegerField(default=0)
-
     power = models.IntegerField(default=0)
-
     conditioner = models.BooleanField(default=False)
-
     insurance = models.BooleanField(default=False)
-
     age_for = models.IntegerField(default=0)
-
     day_limit_city = models.IntegerField(default=0)
-
     day_limit_reg = models.IntegerField(default=0)
-
     cashbeck = models.FloatField(default=0)
-
     cost_day_tash = models.FloatField(default=0)
-
     cost_hour_tash = models.FloatField(default=0)
-
     costs = models.ForeignKey(
         Viloyatlar,
         on_delete=models.CASCADE,
         null=True,
         blank=True
     )
-
     depozit = models.FloatField(default=0)
-
     is_discount = models.BooleanField(default=False)
-
     car_model = models.CharField(choices=MODEL, max_length=500)
-
     car_name = models.CharField(
         max_length=500,
         null=True,
         blank=True
     )
-
     car_name_ru = models.CharField(max_length=500, null=True, blank=True)
-
     car_name_en = models.CharField(max_length=500, null=True, blank=True)
-
     car_code = models.CharField(
         choices=Codes,
         max_length=500,
         null=True,
         blank=True
     )
-
     car_number = models.CharField(
         max_length=500,
         null=True,
         blank=True
     )
-
-    car_image_logo = models.FileField(
-        upload_to='car_images/',
-        null=True,
-        blank=True
-    )
-
-    car_image_portfolio = models.FileField(
-        upload_to='car_images/',
-        null=True,
-        blank=True
-    )
-
+    car_image_logo = models.URLField(null=True, blank=True)
+    car_image_portfolio = models.URLField(null=True, blank=True)
     car_image = models.ForeignKey(
         CarImage,
         on_delete=models.CASCADE,
         null=True,
         blank=True
     )
-
-    tex_pasport = models.FileField(
-        upload_to='tex_pasports/',
-        null=True,
-        blank=True
-    )
-
+    tex_pasport = models.URLField(null=True, blank=True)
     status = models.CharField(choices=CarStatus, max_length=500)
-
     created = models.DateTimeField(auto_now_add=True)
-
     updated = models.DateTimeField(auto_now=True)
-
     commit = models.TextField(null=True, blank=True)
-
     commit_ru = models.TextField(null=True, blank=True)
-
     commit_en = models.TextField(null=True, blank=True)
-
     cost_driver = models.FloatField(default=0)
-
     airport_VIP_cost = models.FloatField(default=0)
-    
 # agar VIP emas uchun cost bo'lsa uni ham qo'shish kerak
-
     class Meta:
         verbose_name = "Car"
         verbose_name_plural = "Cars"
@@ -640,20 +593,23 @@ class Discount(models.Model):
     
 #think about order create logic 
 class Order(models.Model):
-    user = models.ForeignKey('user.User', on_delete = models.CASCADE, related_name = "order_user")
+    user = models.ForeignKey('user.User', on_delete=models.CASCADE, related_name="order_user")
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='orders')
-    manager = models.ForeignKey(Manager, on_delete = models.SET_NULL, null=True, blank=True, related_name = "order_manager")
-    car = models.ForeignKey(Car, on_delete = models.CASCADE)
-    start_time = models.DateTimeField(default=timezone.now)  # e.g. 2026-10-10 12:00
-    end_time = models.DateTimeField(default=timezone.now)    # e.g. 2026-10-12 15:00
-    location_from = models.CharField(choices = Location_ok, max_length=500)
-    location_to = models.CharField(choices = Location_ok, max_length=500)
-    airport_VIP = models.BooleanField(default = False)
-    is_driver = models.BooleanField(default = False)
-    use_cashback = models.BooleanField(default = False)
-    status = models.CharField(choices = STATUS, max_length=500)
-    payment_system = models.CharField(choices = PAYMENT_SYSTEM, max_length=500)
-    
+    manager = models.ForeignKey(Manager, on_delete=models.SET_NULL, null=True, blank=True, related_name="order_manager")
+    car = models.ForeignKey(Car, on_delete=models.CASCADE)
+
+    start_time = models.DateTimeField(default=timezone.now)
+    end_time = models.DateTimeField(default=timezone.now)
+
+    location_from = models.CharField(choices=Location_ok, max_length=500)
+    location_to = models.CharField(choices=Location_ok, max_length=500)
+
+    airport_VIP = models.BooleanField(default=False)
+    is_driver = models.BooleanField(default=False)
+    use_cashback = models.BooleanField(default=False)
+
+    status = models.CharField(choices=STATUS, max_length=500)
+    payment_system = models.CharField(choices=PAYMENT_SYSTEM, max_length=500)
 
     class Meta:
         permissions = [
@@ -664,63 +620,225 @@ class Order(models.Model):
     def __str__(self):
         return f"{self.start_time} dan {self.end_time} gacha {self.user.full_name}"
 
+    # ================= WORKDAY VALIDATION =================
+
+    def clean(self):
+        """
+        Order vaqtini CompanyWorkDay bilan tekshiradi
+        Agar workday topilmasa -> 24/7 deb qabul qilinadi
+        """
+
+        order_day = self.start_time.date()
+
+        workday = CompanyWorkDay.objects.filter(
+            company=self.company,
+            day=order_day
+        ).first()
+
+        if not workday:
+            return  # workday yo'q → 24/7 ishlaydi
+
+        if workday.is_24_7:
+            return  # 24/7
+
+        if not workday.is_working:
+            raise ValidationError("Bu kunda filial ishlamaydi")
+
+        if not workday.start_time or not workday.end_time:
+            return
+
+        work_start = timezone.make_aware(
+            datetime.combine(workday.day, workday.start_time)
+        )
+
+        work_end = timezone.make_aware(
+            datetime.combine(workday.day, workday.end_time)
+        )
+
+        if self.start_time < work_start or self.start_time > work_end:
+            raise ValidationError(
+                f"Order boshlanish vaqti ish vaqtidan tashqarida ({workday.start_time}-{workday.end_time})"
+            )
+
+        if self.end_time < work_start or self.end_time > work_end:
+            raise ValidationError(
+                f"Order tugash vaqti ish vaqtidan tashqarida ({workday.start_time}-{workday.end_time})"
+            )
+
+    # ================= COST CALCULATION =================
+
     def calculate_cost(self):
-        """Order uchun umumiy narxni hisoblaydi, driver, VIP, aksiya va cashback bilan"""
+        """Order uchun umumiy narxni hisoblaydi"""
+
         car = self.car
         duration = self.end_time - self.start_time
+
         total_hours = duration.total_seconds() / 3600
         total_days = duration.days + (1 if duration.seconds > 0 else 0)
-        # Asosiy cost (soatlik yoki kunlik)
+
+        # Asosiy narx
         if car.cost_hour_tash and total_hours <= 24:
             base_cost = total_hours * car.cost_hour_tash
         else:
             base_cost = total_days * car.cost_day_tash
-        # Driver va VIP
+
+        # Driver
         if self.is_driver:
             base_cost += car.cost_driver
+
+        # VIP
         if self.airport_VIP:
             base_cost += car.airport_VIP_cost
-        # Aksiya foizi
+
+        # Aksiya
         now = timezone.now()
-        active_discounts = car.discounts.filter(is_active=True, diedline__gte=now.date())
+        active_discounts = car.discounts.filter(
+            is_active=True,
+            diedline__gte=now.date()
+        )
+
         if active_discounts.exists():
             discount = active_discounts.latest('created_at')
             base_cost = base_cost * (1 - discount.discount / 100)
+
         # Cashback ishlatish
         if self.use_cashback:
-            user_cashback = self.user.cashback_transactions.filter(type="earn").aggregate(
+
+            user_cashback = self.user.cashback_transactions.filter(
+                type="earn"
+            ).aggregate(
                 total_earned=Sum("amount")
             )['total_earned'] or 0
-            user_spent = self.user.cashback_transactions.filter(type="spend").aggregate(
+
+            user_spent = self.user.cashback_transactions.filter(
+                type="spend"
+            ).aggregate(
                 total_spent=Sum("amount")
             )['total_spent'] or 0
+
             available_cashback = user_cashback - user_spent
+
             if available_cashback > 0:
+
                 cashback_to_use = min(base_cost, available_cashback)
                 base_cost -= cashback_to_use
-                # Spend transaction yaratish yoki update qilish
+
                 CashbackTransaction.objects.update_or_create(
                     user=self.user,
                     order=self,
                     type="spend",
                     defaults={"amount": cashback_to_use}
                 )
+
         return round(base_cost, 2)
 
+    # ================= SAVE =================
+
     def save(self, *args, **kwargs):
-        # Order summasini hisoblash
+
+        # Workday validation
+        self.full_clean()
+
+        # Cost hisoblash
         self.cost = self.calculate_cost()
+
         super().save(*args, **kwargs)
-        # use_cashback=False bo‘lsa, earn cashback yaratish yoki update qilish
+
+        # Cashback earn
         if not self.use_cashback:
+
             cashback_amount = self.cost * self.car.cashbeck / 100
+
             if cashback_amount > 0:
+
                 CashbackTransaction.objects.update_or_create(
                     user=self.user,
                     order=self,
                     type="earn",
                     defaults={"amount": cashback_amount}
                 )
+# class Order(models.Model):
+#     user = models.ForeignKey('user.User', on_delete = models.CASCADE, related_name = "order_user")
+#     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='orders')
+#     manager = models.ForeignKey(Manager, on_delete = models.SET_NULL, null=True, blank=True, related_name = "order_manager")
+#     car = models.ForeignKey(Car, on_delete = models.CASCADE)
+#     start_time = models.DateTimeField(default=timezone.now)  # e.g. 2026-10-10 12:00
+#     end_time = models.DateTimeField(default=timezone.now)    # e.g. 2026-10-12 15:00
+#     location_from = models.CharField(choices = Location_ok, max_length=500)
+#     location_to = models.CharField(choices = Location_ok, max_length=500)
+#     airport_VIP = models.BooleanField(default = False)
+#     is_driver = models.BooleanField(default = False)
+#     use_cashback = models.BooleanField(default = False)
+#     status = models.CharField(choices = STATUS, max_length=500)
+#     payment_system = models.CharField(choices = PAYMENT_SYSTEM, max_length=500)
+    
+
+#     class Meta:
+#         permissions = [
+#             ("can_view_company_orders", "Can view company orders"),
+#             ("can_manage_orders", "Can manage orders")
+#         ]
+
+#     def __str__(self):
+#         return f"{self.start_time} dan {self.end_time} gacha {self.user.full_name}"
+
+#     def calculate_cost(self):
+#         """Order uchun umumiy narxni hisoblaydi, driver, VIP, aksiya va cashback bilan"""
+#         car = self.car
+#         duration = self.end_time - self.start_time
+#         total_hours = duration.total_seconds() / 3600
+#         total_days = duration.days + (1 if duration.seconds > 0 else 0)
+#         # Asosiy cost (soatlik yoki kunlik)
+#         if car.cost_hour_tash and total_hours <= 24:
+#             base_cost = total_hours * car.cost_hour_tash
+#         else:
+#             base_cost = total_days * car.cost_day_tash
+#         # Driver va VIP
+#         if self.is_driver:
+#             base_cost += car.cost_driver
+#         if self.airport_VIP:
+#             base_cost += car.airport_VIP_cost
+#         # Aksiya foizi
+#         now = timezone.now()
+#         active_discounts = car.discounts.filter(is_active=True, diedline__gte=now.date())
+#         if active_discounts.exists():
+#             discount = active_discounts.latest('created_at')
+#             base_cost = base_cost * (1 - discount.discount / 100)
+#         # Cashback ishlatish
+#         if self.use_cashback:
+#             user_cashback = self.user.cashback_transactions.filter(type="earn").aggregate(
+#                 total_earned=Sum("amount")
+#             )['total_earned'] or 0
+#             user_spent = self.user.cashback_transactions.filter(type="spend").aggregate(
+#                 total_spent=Sum("amount")
+#             )['total_spent'] or 0
+#             available_cashback = user_cashback - user_spent
+#             if available_cashback > 0:
+#                 cashback_to_use = min(base_cost, available_cashback)
+#                 base_cost -= cashback_to_use
+#                 # Spend transaction yaratish yoki update qilish
+#                 CashbackTransaction.objects.update_or_create(
+#                     user=self.user,
+#                     order=self,
+#                     type="spend",
+#                     defaults={"amount": cashback_to_use}
+#                 )
+#         return round(base_cost, 2)
+
+#     def save(self, *args, **kwargs):
+#         # Order summasini hisoblash
+#         self.cost = self.calculate_cost()
+#         super().save(*args, **kwargs)
+#         # use_cashback=False bo‘lsa, earn cashback yaratish yoki update qilish
+#         if not self.use_cashback:
+#             cashback_amount = self.cost * self.car.cashbeck / 100
+#             if cashback_amount > 0:
+#                 CashbackTransaction.objects.update_or_create(
+#                     user=self.user,
+#                     order=self,
+#                     type="earn",
+#                     defaults={"amount": cashback_amount}
+#                 )
 
 
 class CashbackTransaction(models.Model):
@@ -862,6 +980,7 @@ class Chat(models.Model):
     user = models.ForeignKey('user.User', on_delete=models.CASCADE, related_name='user_chats')
     manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='manager_chats')
     created_at = models.DateTimeField(auto_now_add=True)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, null=True, blank=True)
 
     class Meta:
         verbose_name = "Chat"
@@ -871,6 +990,12 @@ class Chat(models.Model):
             ("can_view_manager_chats", "Can view manager chats"),
             ("can_manage_chats", "Can manage chats"),
         ]
+        
+    def save(self, *args, **kwargs):
+        # agar order bor bo'lsa manager ni avtomatik qo'yadi
+        if self.order and self.order.manager:
+            self.manager = self.order.manager
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.user.full_name} ↔ {self.manager.user.full_name}"
@@ -880,6 +1005,7 @@ class ChatMessage(models.Model):
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     message = models.TextField()
+    file = models.FileField(upload_to='chat/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -887,6 +1013,10 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.sender.full_name}: {self.message[:30]}"
+    
+    def get_logo_url(self):
+        name = self.sender.lower()
+        return static(f'{name}.png')
 
 class Notification(models.Model):
     user = models.ForeignKey('user.User', on_delete = models.CASCADE)
