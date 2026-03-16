@@ -543,16 +543,12 @@ class GenerateUploadURL(APIView):
         tags=["Upload"]
     )
     def post(self, request):
-
         file = request.FILES.get("file")
-
         if not file:
             return Response({"error": "File required"}, status=400)
-
         ext = file.name.split(".")[-1]
         unique_name = f"{uuid.uuid4()}.{ext}"
         file_key = f"car_images/{unique_name}"
-
         s3 = boto3.client(
             "s3",
             region_name=settings.AWS_S3_REGION_NAME,
@@ -560,7 +556,6 @@ class GenerateUploadURL(APIView):
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
         )
-
         s3.upload_fileobj(
             file,
             settings.AWS_STORAGE_BUCKET_NAME,
@@ -570,9 +565,7 @@ class GenerateUploadURL(APIView):
                 "ContentType": file.content_type
             }
         )
-
         file_url = f"{settings.AWS_S3_ENDPOINT_URL}/{settings.AWS_STORAGE_BUCKET_NAME}/{file_key}"
-
         return Response({
             "file_url": file_url
         }, status=status.HTTP_200_OK)
