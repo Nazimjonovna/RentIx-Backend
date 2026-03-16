@@ -874,3 +874,11 @@ class CarModelPortfolioSerializer(serializers.ModelSerializer):
             "car_model",
             "car_image_portfolio"
         ]
+        
+
+class UploadURLResponseSerializer(serializers.Serializer):
+    upload_url = serializers.CharField()
+    file_url = serializers.CharField()
+    
+class UploadURLRequestSerializer(serializers.Serializer):
+    file_name = serializers.CharField()

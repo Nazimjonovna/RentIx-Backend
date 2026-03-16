@@ -51,6 +51,7 @@ from .serializers import (
     OrderStatusSerializer,BlockUserSerializer,DiscountSerializer,
     CheckInOutSerializer, ImagesCheckOutSerializer, ImagesCheckInSerializer,
     FilialSerializer, ViloyatlarSerializer,CarModelPortfolioSerializer,
+    UploadURLResponseSerializer,UploadURLRequestSerializer, 
 )
 from .utils.logger import logged
 from drf_yasg import openapi
@@ -523,58 +524,58 @@ class OrderChangeView(APIView):
             status=status.HTTP_204_NO_CONTENT
         )
 
-
+import uuid
 class GenerateUploadURL(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]  # MultiPartParser faylni yuborish uchun kerak
+    parser_classes = [MultiPartParser, FormParser]
 
     @swagger_auto_schema(
-        operation_description="Faylni yuklash uchun presigned URL olish",
+        operation_description="Rasm yuklash",
         manual_parameters=[
-            openapi.Parameter('file', openapi.IN_FORM, description="Yuklanadigan fayl", type=openapi.TYPE_FILE)
+            openapi.Parameter(
+                "file",
+                openapi.IN_FORM,
+                description="Upload image",
+                type=openapi.TYPE_FILE,
+                required=True,
+            )
         ],
-        responses={200: openapi.Response(
-            description="Fayl URL", schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT, properties={
-                    'upload_url': openapi.Schema(type=openapi.TYPE_STRING),
-                    'file_url': openapi.Schema(type=openapi.TYPE_STRING)
-                }
-            ))
-        }
+        tags=["Upload"]
     )
-    def post(self, request, *args, **kwargs):
-        """Faylni yuklash uchun presigned URL olish"""
-        file = request.FILES.get('file')
-        if not file:
-            return Response({"message": "Fayl mavjud emas.", "status": 400})
+    def post(self, request):
 
-        file_name = file.name
-        file_key = f"car_images/{file_name}"
-        
-        # Boto3 client
-        client = boto3.client(
-            's3',
+        file = request.FILES.get("file")
+
+        if not file:
+            return Response({"error": "File required"}, status=400)
+
+        ext = file.name.split(".")[-1]
+        unique_name = f"{uuid.uuid4()}.{ext}"
+        file_key = f"car_images/{unique_name}"
+
+        s3 = boto3.client(
+            "s3",
             region_name=settings.AWS_S3_REGION_NAME,
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
         )
 
-        # Presigned URL olish
-        url = client.generate_presigned_url(
-            'put_object',
-            Params={
-                'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
-                'Key': file_key,
-                'ACL': 'public-read'
-            },
-            ExpiresIn=3600
+        s3.upload_fileobj(
+            file,
+            settings.AWS_STORAGE_BUCKET_NAME,
+            file_key,
+            ExtraArgs={
+                "ACL": "public-read",
+                "ContentType": file.content_type
+            }
         )
 
+        file_url = f"{settings.AWS_S3_ENDPOINT_URL}/{settings.AWS_STORAGE_BUCKET_NAME}/{file_key}"
+
         return Response({
-            'upload_url': url,
-            'file_url': f"{settings.MEDIA_URL}{file_key}"
-        })
+            "file_url": file_url
+        }, status=status.HTTP_200_OK)
 
 
 class CarCreateView(APIView):
@@ -583,6 +584,7 @@ class CarCreateView(APIView):
 
     @swagger_auto_schema(
         tags=["Car"],
+        request_body=CarSerializer,
         manual_parameters=[TRANSLATION_HEADER]
     )
     def post(self, request, *args, **kwargs):
