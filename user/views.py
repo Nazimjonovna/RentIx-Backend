@@ -40,7 +40,8 @@ from .models import (
     ChekInOut, ImagesCheckOut, ImagesCheckIn, Viloyatlar
 )
 from .serializers import (
-    AvailableCarTimeFilterSerializer, CarImageSerializer, CheckInOutSerializer, FilialSerializer, FilialSerializer, PhoneSerializer, SMSCodeSerializer, ValidateSerializer, RegisterSerializer, OrderPageSerializer, 
+    AvailableCarTimeFilterSerializer, CarImageSerializer, CheckInOutSerializer, FilialSerializer, FilialSerializer, PhoneSerializer, SMSCodeSerializer, 
+    ValidateSerializer, RegisterSerializer, OrderPageSerializer, UserProfileSerializer,
     CarSerializer, CreateAdminSerializer, ManagerSerializer,
     RateSerializer, ChatMessageSerializer, ChatSerializer, NotificationSerializer,
     OrderSerializer, CompanyWorkDaySerializer, UserTokenRequestSerializer,
@@ -319,7 +320,7 @@ class UserProfilView(APIView):
         #user get ni qoshdim
         try:
             user = User.objects.get(id=pk)
-            serializer = RegisterSerializer(user)
+            serializer = UserProfileSerializer(user)
             return Response({
                 "user": serializer.data,
                 "status": status.HTTP_200_OK
@@ -345,11 +346,11 @@ class UserProfilView(APIView):
                 "status":status.HTTP_404_NOT_FOUND
             })
 
-    @swagger_auto_schema(request_body=RegisterSerializer, tags = ["User"])     
+    @swagger_auto_schema(request_body=UserProfileSerializer, tags = ["User"])     
     def patch(self, request, pk, *args, **kwargs):
         user = User.objects.get(id = pk)
         if user:
-            serializer = RegisterSerializer(instance = user, data = request.data, partial = True)
+            serializer = UserProfileSerializer(instance = user, data = request.data, partial = True)
             if serializer.is_valid():
                 serializer.save()
                 return Response({

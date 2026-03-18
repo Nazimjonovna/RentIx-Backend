@@ -58,6 +58,12 @@ class RegisterSerializer(serializers.ModelSerializer):
             "telegram_id",
             "role",
         )
+        
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = "__all__"
 
 
 class CompanyWorkDaySerializer(serializers.ModelSerializer):
