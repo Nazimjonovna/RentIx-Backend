@@ -127,3 +127,4 @@ urlpatterns = [
     # path('company/subscriptions/<int:pk>/', CompanySubscriptionAPIView.as_view(), name='company-subscription-detail'),
 
 ]
+#// db must apdate
