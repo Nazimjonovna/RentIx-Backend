@@ -1562,58 +1562,12 @@ class GetUserTokenView(APIView):
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print(f"❌ GetUserTokenView error: {e}")
+            print(f"GetUserTokenView error: {e}")
             return Response({
                 "status": False,
                 "detail": _("So'rovni bajarishda xatolik yuz berdi."),
                 "error": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-# class GetUserTokenView(APIView):
-#     permission_classes = [AllowAny]
-
-#     @swagger_auto_schema(request_body = UserTokenRequestSerializer, tags=['Register'])
-#     def post(self, request, *args, **kwargs):
-#         phone = request.data.get("phone")
-#         telegram_id = request.data.get("telegram_id")
-#         if not phone or not telegram_id:
-#             return Response({
-#                 "status": False,
-#                 "detail": _("phone va telegram_id majburiy!")
-#             }, status=status.HTTP_400_BAD_REQUEST)
-#         try:
-#             user = User.objects.filter(phone=phone, telegram_id=telegram_id).first()
-#             print(user)
-#             print(phone, telegram_id)
-#             if not user:
-#                 return Response({
-#                     "status": False,
-#                     "detail": _("Bunday foydalanuvchi topilmadi.")
-#                 }, status=status.HTTP_404_NOT_FOUND)
-#             access_token = AccessToken.for_user(user)
-#             refresh_token = RefreshToken.for_user(user)
-#             return Response({
-#                 "status": True,
-#                 "message": _("Foydalanuvchi topildi."),
-#                 "user": {
-#                     "id": user.id,
-#                     "phone": user.phone,
-#                     "role": user.role,
-#                     "full_name": user.full_name,
-#                     "telegram_id": user.telegram_id,
-#                 },
-#                 "tokens": {
-#                     "access": str(access_token),
-#                     "refresh": str(refresh_token),
-#                 }
-#             }, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             print(f"❌ GetUserTokenView error: {e}")
-#             return Response({
-#                 "status": False,
-#                 "detail": _("So'rovni bajarishda xatolik yuz berdi."),
-#                 "error": str(e)
-#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CarRateListCreateView(generics.ListCreateAPIView):
@@ -1949,13 +1903,10 @@ class BlockUserView(APIView):
 
     @swagger_auto_schema(request_body=BlockUserSerializer, tags=['User'])
     def post(self, request):
-        user_id = request.data.get('user_id')
-        is_blocked = request.data.get('is_blocked')
-        if not user_id or not is_blocked:
-            return Response(
-                {"detail": "User ID and is_blocked are required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_id = serializer.validated_data.get('user_id')
+        is_blocked = serializer.validated_data.get('is_blocked')
         user = User.objects.filter(id=user_id).first()
         if not user:
             return Response(
@@ -1964,8 +1915,9 @@ class BlockUserView(APIView):
             )
         user.is_blocked = is_blocked
         user.save()
+        message = "User blocked successfully" if is_blocked else "User unblocked successfully"
         return Response(
-            {"detail": "User blocked successfully"},
+            {"detail": message},
             status=status.HTTP_200_OK
         )
 

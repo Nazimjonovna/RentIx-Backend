@@ -5,6 +5,8 @@ from django.dispatch import receiver
 from .models import BotNotification, ChekInOut, User, Order
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from googletrans import Translator
 from .models import (
     Company, Filial, Car, Discount, 
@@ -15,7 +17,8 @@ from .models import (
 translator = Translator()
 
 
-TELEGRAM_API_URL = f"https://t.me/RentiixBot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+# TELEGRAM_API_URL = f"https://t.me/RentiixBot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
 
 
 @receiver(post_save, sender=Order)
@@ -39,21 +42,42 @@ def update_user_order_count_and_role(sender, instance, created, **kwargs):
 def send_notification_to_users(sender, instance, created, **kwargs):
     if not created:
         return
-
     users = User.objects.all()
-
-    text = f"📢 *{instance.title}*\n\n{instance.message}"
-
+    channel_layer = get_channel_layer()
+    text = f"*{instance.title}*\n\n{instance.message}"
     for user in users:
-        payload = {
-            "chat_id": user.telegram_id,
-            "text": text,
-            "parse_mode": "Markdown"
-        }
         try:
-            requests.post(TELEGRAM_API_URL, json=payload, timeout=5)
+            # DB ga notification yaratamiz
+            notification = Notification.objects.create(
+                user=user,
+                manager=instance.manager,  # BotNotification’da manager bor deb hisoblayapman
+                title=instance.title,
+                message=instance.message,
+            )
+
+            # WebSocket orqali real-time yuboramiz
+            async_to_sync(channel_layer.group_send)(
+                f"notify_{user.id}",
+                {
+                    "type": "notify",
+                    "title": notification.title,
+                    "message": notification.message,
+                    "manager_name": notification.manager.user.full_name,
+                    "created_at": str(notification.created_at),
+                }
+            )
+
+            # Telegramga yuboramiz (agar userda telegram_id bo‘lsa)
+            if user.telegram_id:
+                payload = {
+                    "chat_id": user.telegram_id,
+                    "text": text,
+                    "parse_mode": "Markdown"
+                }
+                requests.post(TELEGRAM_API_URL, json=payload, timeout=5)
+
         except Exception as e:
-            print(f"Failed to send to {user.telegram_id}: {e}")
+            print(f"Error for user {user.id}: {e}")
 
 
 @receiver(post_save, sender=ChekInOut)
@@ -76,7 +100,6 @@ def finish_checkout(request, pk):
     return requests.Response({"status": "completed"})
 
 #Til bo'yicha konfiguratsiya
-
 
 
 def translate_text(text, dest_lang):
