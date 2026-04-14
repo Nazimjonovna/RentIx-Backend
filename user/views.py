@@ -1903,23 +1903,29 @@ class BlockUserView(APIView):
 
     @swagger_auto_schema(request_body=BlockUserSerializer, tags=['User'])
     def post(self, request):
-        serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user_id = serializer.validated_data.get('user_id')
-        is_blocked = serializer.validated_data.get('is_blocked')
-        user = User.objects.filter(id=user_id).first()
-        if not user:
+        admin = request.user
+        if admin.role in ['manager', 'admin']:
+            serializer = self.serializer_class(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user_id = serializer.validated_data.get('user_id')
+            is_blocked = serializer.validated_data.get('is_blocked')
+            user = User.objects.filter(id=user_id).first()
+            if not user:
+                return Response(
+                    {"detail": "User not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            user.is_blocked = is_blocked
+            user.save()
+            message = "User blocked successfully" if is_blocked else "User unblocked successfully"
             return Response(
-                {"detail": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": message},
+                status=status.HTTP_200_OK
             )
-        user.is_blocked = is_blocked
-        user.save()
-        message = "User blocked successfully" if is_blocked else "User unblocked successfully"
-        return Response(
-            {"detail": message},
-            status=status.HTTP_200_OK
-        )
+        else:
+            return Response({
+                "data":"Sizga ruxsat yo"
+            })
 
 
 class DiscountView(APIView):
