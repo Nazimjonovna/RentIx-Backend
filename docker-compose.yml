@@ -43,6 +43,23 @@ services:
     volumes:
       - ./backups:/backups   # Cron backup folder mapping
 
+  bot:
+    image: ghcr.io/nazimjonovna/rentix-backend:sha-28f66b5
+    container_name: rentix_bot
+    networks:
+      rentix-net:
+        ipv4_address: 172.18.0.13
+    environment:
+      APP_MODE: bot
+      DB_HOST: db
+      DB_NAME: rentixdb
+      POSTGRES_USER: rentixuser
+      POSTGRES_PASSWORD: rentixpass
+    env_file:
+      - .env
+    depends_on:
+      - db
+
   redis:
     image: redis:7
     ports:

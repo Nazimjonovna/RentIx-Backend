@@ -28,4 +28,14 @@ USER appuser
 EXPOSE 8000
 
 #CMD ["gunicorn", "RentIx.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
-CMD python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py runserver 0.0.0.0:8000
+CMD sh -c "\
+if [ \"$APP_MODE\" = 'bot' ]; then \
+    python RentIx/bot.py; \
+elif [ \"$APP_MODE\" = 'both' ]; then \
+    python RentIx/bot.py & \
+    python manage.py migrate && \
+    python manage.py runserver 0.0.0.0:8000; \
+else \
+    python manage.py migrate && \
+    python manage.py runserver 0.0.0.0:8000; \
+fi"
