@@ -326,8 +326,8 @@ CSRF_TRUSTED_ORIGINS = [
     'https://api.rentix.mirabbosoff.uz',
     'http://api.rentix.mirabbosoff.uz',
     "http://167.172.76.94",
-    "https://admin.mirabbosoff.uz/",
-    "https://user.mirabbosoff.uz/",
+    "https://admin.mirabbosoff.uz",
+    "https://user.mirabbosoff.uz",
 ]
 
 
