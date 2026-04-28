@@ -75,31 +75,13 @@ TRANSLATION_HEADER = openapi.Parameter(
 )
 
 
-def get_bearer_token(request):
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        return auth.split(" ", 1)[1]
-    return None
-
-
-def get_token_payload(request):
-    token = get_bearer_token(request)
-    if not token:
-        return {}
-
-    try:
-        access = AccessToken(token)
-        return access.payload
-    except Exception:
-        return {}
-
-
 def get_auth_role(request):
-    payload = get_token_payload(request)
+    token = getattr(request, "auth", None)
 
-    role = payload.get("role")
-    if role:
-        return str(role).lower()
+    if token:
+        role = token.get("role")
+        if role:
+            return str(role).lower()
 
     user = getattr(request, "user", None)
     if user and getattr(user, "is_authenticated", False):
@@ -111,16 +93,15 @@ def get_auth_role(request):
 
 
 def get_auth_company(request):
-    payload = get_token_payload(request)
+    token = getattr(request, "auth", None)
     role = get_auth_role(request)
 
     if role == "admin":
-        company_id = payload.get("company_id")
-        if company_id:
-            return Company.objects.filter(id=company_id).first()
+        company_id = token.get("company_id") if token else None
+        return Company.objects.filter(id=company_id).first()
 
     if role == "manager":
-        manager_id = payload.get("manager_id")
+        manager_id = token.get("manager_id") if token else None
         manager = Manager.objects.filter(id=manager_id).select_related("company").first()
         return manager.company if manager else None
 
@@ -128,10 +109,12 @@ def get_auth_company(request):
 
 
 def get_auth_manager(request):
-    payload = get_token_payload(request)
-    manager_id = payload.get("manager_id")
+    token = getattr(request, "auth", None)
+    manager_id = token.get("manager_id") if token else None
+
     if manager_id:
         return Manager.objects.filter(id=manager_id).select_related("company", "filial").first()
+
     return None
 
 
@@ -141,6 +124,7 @@ def is_superadmin_or_admin(request):
 
 def is_admin_or_manager(request):
     return get_auth_role(request) in ["admin", "manager"]
+
 
 utc = pytz.timezone(settings.TIME_ZONE)
 min = 1
@@ -1166,30 +1150,32 @@ class CreateManagerView(APIView):
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(
-        request_body=LoginSerializer,
-        tags=["Login"]
-    )
+    @swagger_auto_schema(request_body=LoginSerializer, tags=["Login"])
     def post(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
         login = serializer.validated_data["login"]
         password = serializer.validated_data["password"]
+
         manager = Manager.objects.filter(
             login=login,
             password=password
         ).select_related("company", "filial").first()
+
         if manager:
             refresh = RefreshToken()
             refresh["role"] = "manager"
             refresh["manager_id"] = manager.id
-            refresh["company_id"] = manager.company.id
-            refresh["filial_id"] = manager.filial.id
+            refresh["company_id"] = manager.company_id
+            refresh["filial_id"] = manager.filial_id
+
             access = refresh.access_token
             access["role"] = "manager"
             access["manager_id"] = manager.id
-            access["company_id"] = manager.company.id
-            access["filial_id"] = manager.filial.id
+            access["company_id"] = manager.company_id
+            access["filial_id"] = manager.filial_id
+
             return Response({
                 "message": "Login muvaffaqiyatli (Manager)",
                 "access": str(access),
@@ -1198,8 +1184,8 @@ class LoginView(APIView):
                     "id": manager.id,
                     "username": manager.username,
                     "role": "manager",
-                    "company_id": manager.company.id,
-                    "filial_id": manager.filial.id,
+                    "company_id": manager.company_id,
+                    "filial_id": manager.filial_id,
                 }
             }, status=status.HTTP_200_OK)
 
@@ -1207,13 +1193,16 @@ class LoginView(APIView):
             login=login,
             password=password
         ).first()
+
         if company:
             refresh = RefreshToken()
             refresh["role"] = "admin"
             refresh["company_id"] = company.id
+
             access = refresh.access_token
             access["role"] = "admin"
             access["company_id"] = company.id
+
             return Response({
                 "message": "Login muvaffaqiyatli (Admin)",
                 "access": str(access),
@@ -1225,9 +1214,79 @@ class LoginView(APIView):
                     "company_id": company.id,
                 }
             }, status=status.HTTP_200_OK)
+
         return Response({
             "message": "Login yoki parol noto'g'ri"
         }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        
+class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(tags=["Auth"])
+    def get(self, request):
+        role = get_auth_role(request)
+
+        if role == "admin":
+            company = get_auth_company(request)
+            if not company:
+                return Response({"detail": "Company topilmadi"}, status=404)
+
+            return Response({
+                "type": "company",
+                "role": "admin",
+                "data": {
+                    "id": company.id,
+                    "name": company.name,
+                    "full_name": company.full_name,
+                    "phone1": company.phone1,
+                    "phone2": company.phone2,
+                    "login": company.login,
+                    "role": company.role,
+                    "INN": company.INN,
+                }
+            })
+
+        if role == "manager":
+            manager = get_auth_manager(request)
+            if not manager:
+                return Response({"detail": "Manager topilmadi"}, status=404)
+
+            return Response({
+                "type": "manager",
+                "role": "manager",
+                "data": {
+                    "id": manager.id,
+                    "username": manager.username,
+                    "phone": manager.phone,
+                    "phone1": manager.phone1,
+                    "login": manager.login,
+                    "role": manager.role,
+                    "status": manager.status,
+                    "work_time": manager.work_time,
+                    "company": {
+                        "id": manager.company.id,
+                        "name": manager.company.name,
+                    },
+                    "filial": {
+                        "id": manager.filial.id,
+                        "name": manager.filial.name,
+                    }
+                }
+            })
+
+        user = request.user
+        return Response({
+            "type": "user",
+            "role": user.role,
+            "data": {
+                "id": user.id,
+                "phone": user.phone,
+                "full_name": user.full_name,
+                "role": user.role,
+                "is_blocked": user.is_blocked,
+            }
+        })
 
 
 class ManagerCRUDView(APIView):

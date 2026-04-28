@@ -241,7 +241,7 @@ class Company(models.Model):
     phone1 = models.CharField(validators=[phone_regex],max_length=200)
     phone2 = models.CharField(validators=[phone_regex],max_length=200)
     full_name = models.TextField()
-    role = models.CharField(choices = USER_ROLES, max_length=500, default="manager", editable=False)
+    role = models.CharField(choices = USER_ROLES, max_length=500, default="admin", editable=False)
     diedline_zalog = models.PositiveIntegerField(default=72, help_text="Kompaniya zalog muddati (soatlarda)")
     INN = models.CharField(max_length=100, null=True, blank=True)
     click_id = models.CharField(max_length=200, null=True, blank=True)
@@ -432,6 +432,7 @@ class Manager(models.Model):
     phone = models.CharField(validators=[phone_regex],max_length=200)
     phone1 = models.CharField(validators=[phone_regex], max_length=200, null=True, blank=True)
     username = models.CharField(max_length = 200) 
+    full_name = models.TextField()
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="managers")
     filial = models.ForeignKey(Filial, on_delete=models.CASCADE, related_name="managers")
     role = models.CharField(choices = USER_ROLES, max_length=500, default="manager", editable=False)
@@ -461,7 +462,7 @@ class Manager(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.user.full_name} | {self.company} | {self.filial}"
+        return f"{self.full_name} | {self.company} | {self.filial}"
     
 
 class CarImage(models.Model):
@@ -772,7 +773,7 @@ class Rate(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.user.full_name} - {self.company.name} - {self.manager.user.full_name}"
+        return f"{self.user.full_name} - {self.company.name} - {self.manager.username}"
     
     def calculate_rate_company(self):
         """
@@ -881,7 +882,7 @@ class Chat(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.user.full_name} ↔ {self.manager.user.full_name}"
+        return f"{self.user.full_name} ↔ {self.manager.username}"
 
 
 class ChatMessage(models.Model):
@@ -919,7 +920,7 @@ class Notification(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.user.full_name} - {self.manager.user.full_name}"
+        return f"{self.user.full_name} - {self.manager.username}"
 
 
 class BotNotification(models.Model):
@@ -941,7 +942,7 @@ class BotNotification(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.user.full_name} - {self.manager.user.full_name}"
+        return f"{self.user.full_name} - {self.manager.username}"
 
 
 # Keyinchalik Driver ham qo'shiladi hozircha kkmas bu

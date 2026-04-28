@@ -127,7 +127,6 @@ class CompanySerializer(AutoTranslateMixin, serializers.ModelSerializer):
         return instance
 
 
-
 class OrderPageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
@@ -290,31 +289,27 @@ class CreateAdminSerializer(AutoTranslateMixin, serializers.ModelSerializer):
 
 
 class ManagerSerializer(serializers.ModelSerializer):
-    """
-    Manager serializer - tarjima yo'q, faqat relations
-    """
-    # Inputda ID bilan ishlaydi
-    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
     company = serializers.PrimaryKeyRelatedField(queryset=Company.objects.all())
+    filial = serializers.PrimaryKeyRelatedField(queryset=Filial.objects.all())
 
     class Meta:
         model = Manager
         fields = "__all__"
-        read_only_fields = ["approwed_by"]
+        read_only_fields = ["approwed_by", "role"]
 
     def create(self, validated_data):
         request = self.context.get("request")
-        if request and hasattr(request.user, "role") and request.user.role.lower() == "superadmin":
+
+        validated_data["role"] = "manager"
+
+        if request and getattr(request.user, "role", "").lower() == "superadmin":
             validated_data["approwed_by"] = request.user
+
         return super().create(validated_data)
 
-
     def to_representation(self, instance):
-        """
-        Response uchun manager va company batafsil ko'rsatish
-        """
         data = super().to_representation(instance)
-        # Manager ma'lumotlari
+
         data["manager"] = {
             "id": instance.id,
             "username": instance.username,
@@ -325,22 +320,17 @@ class ManagerSerializer(serializers.ModelSerializer):
             "status": instance.status,
             "work_time": instance.work_time,
         }
-        # Company ma'lumotlari tarjima bilan
-        request = self.context.get("request")
-        if request:
-            lang = request.headers.get("Accept-Language", "uz")[:2]
-            if lang == "ru" and hasattr(instance.company, "name_ru"):
-                company_name = instance.company.name_ru or instance.company.name
-            elif lang == "en" and hasattr(instance.company, "name_en"):
-                company_name = instance.company.name_en or instance.company.name
-            else:
-                company_name = instance.company.name
-        else:
-            company_name = instance.company.name
+
         data["company"] = {
             "id": instance.company.id,
-            "name": company_name
+            "name": instance.company.name,
         }
+
+        data["filial"] = {
+            "id": instance.filial.id,
+            "name": instance.filial.name,
+        }
+
         return data
 
     
@@ -352,7 +342,7 @@ class ManagerCRUDSerializer(serializers.ModelSerializer):
     class Meta:
         model = Manager
         fields = "__all__"
-        read_only_fields = ["approwed_by", "user", "company", "role"]
+        read_only_fields = ["approwed_by", "role"]
     
 
 class LoginSerializer(serializers.Serializer):
@@ -404,7 +394,7 @@ class ChatMessageSerializer(serializers.ModelSerializer):
 class ChatSerializer(serializers.ModelSerializer):
     messages = ChatMessageSerializer(many=True, read_only=True)
     user_name = serializers.CharField(source="user.full_name", read_only=True)
-    manager_name = serializers.CharField(source="manager.user.full_name", read_only=True)
+    manager_name = serializers.CharField(source="manager.username", read_only=True)
 
     class Meta:
         model = Chat
@@ -417,19 +407,12 @@ class ChatSerializer(serializers.ModelSerializer):
             "messages",
             "created_at",
         )
-        read_only_fields = (
-            "id",
-            "created_at",
-            "messages",
-        )
+        read_only_fields = ("id", "created_at", "messages")
 
 
 class NotificationSerializer(AutoTranslateMixin, serializers.ModelSerializer):
-    """
-    Notification serializer with translations
-    """
     user_name = serializers.CharField(source="user.full_name", read_only=True)
-    manager_name = serializers.CharField(source="manager.user.full_name", read_only=True)
+    manager_name = serializers.CharField(source="manager.username", read_only=True)
 
     class Meta:
         model = Notification
@@ -439,12 +422,12 @@ class NotificationSerializer(AutoTranslateMixin, serializers.ModelSerializer):
             "user_name",
             "manager",
             "manager_name",
-            "title",          # uz
-            "title_ru",       # ru
-            "title_en",       # en
-            "message",        # uz
-            "message_ru",     # ru
-            "message_en",     # en
+            "title",
+            "title_ru",
+            "title_en",
+            "message",
+            "message_ru",
+            "message_en",
             "is_read",
             "created_at",
         )
@@ -458,7 +441,7 @@ class NotificationSerializer(AutoTranslateMixin, serializers.ModelSerializer):
             "message_ru",
             "message_en",
         )
-        translatable_fields = ['title', 'message']
+        translatable_fields = ["title", "message"]
 
 
 class UserTokenRequestSerializer(serializers.Serializer):

@@ -9,7 +9,7 @@ from .models import (
 # ============== COMPANY ADMIN ==============
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'login', 'owner', 'created_at']
+    list_display = ['name', 'login', 'created_at']
     search_fields = ['name', 'name_ru', 'name_en', 'login']
     list_filter = ['created_at']
 

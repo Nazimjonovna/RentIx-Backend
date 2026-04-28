@@ -40,7 +40,7 @@ from .views import (
     CompanySubscriptionAPIView,
 
     # Bot Notification
-    BotNotificationViewSet,
+    BotNotificationViewSet,MeView, 
 )
 
 # Router for ViewSets
@@ -121,6 +121,8 @@ urlpatterns = [
     # 🔹 Payment
     path("merchant/", MerchantAPIView.as_view(), name="merchant"),
     path('click/', ClickUzMerchantAPIView.as_view()),
+    
+    path("auth/me/", MeView.as_view(), name="auth-me"),
 
     # # 🔹 Company Subscriptions
     # path('company/subscriptions/', CompanySubscriptionAPIView.as_view(), name='company-subscriptions'),
