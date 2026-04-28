@@ -75,17 +75,63 @@ TRANSLATION_HEADER = openapi.Parameter(
 )
 
 
+def get_bearer_token(request):
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth.split(" ", 1)[1]
+    return None
+
+
+def get_token_payload(request):
+    token = get_bearer_token(request)
+    if not token:
+        return {}
+
+    try:
+        access = AccessToken(token)
+        return access.payload
+    except Exception:
+        return {}
+
+
 def get_auth_role(request):
-    token = getattr(request, "auth", None)
-    if token and isinstance(token, dict):
-        role = token.get("role")
-        if role:
-            return str(role).lower()
+    payload = get_token_payload(request)
+
+    role = payload.get("role")
+    if role:
+        return str(role).lower()
+
     user = getattr(request, "user", None)
     if user and getattr(user, "is_authenticated", False):
         role = getattr(user, "role", None)
         if role:
             return str(role).lower()
+
+    return None
+
+
+def get_auth_company(request):
+    payload = get_token_payload(request)
+    role = get_auth_role(request)
+
+    if role == "admin":
+        company_id = payload.get("company_id")
+        if company_id:
+            return Company.objects.filter(id=company_id).first()
+
+    if role == "manager":
+        manager_id = payload.get("manager_id")
+        manager = Manager.objects.filter(id=manager_id).select_related("company").first()
+        return manager.company if manager else None
+
+    return None
+
+
+def get_auth_manager(request):
+    payload = get_token_payload(request)
+    manager_id = payload.get("manager_id")
+    if manager_id:
+        return Manager.objects.filter(id=manager_id).select_related("company", "filial").first()
     return None
 
 
@@ -95,11 +141,6 @@ def is_superadmin_or_admin(request):
 
 def is_admin_or_manager(request):
     return get_auth_role(request) in ["admin", "manager"]
-
-
-def is_superadmin_admin_or_manager(request):
-    return get_auth_role(request) in ["superadmin", "admin", "manager"]
-
 
 utc = pytz.timezone(settings.TIME_ZONE)
 min = 1
@@ -941,7 +982,7 @@ class AdminCRUDView(APIView):
 
 # ============== COMPANY WORK DAY VIEWS ==============
 class CompanyWorkView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         request_body=CompanyWorkDaySerializer,
@@ -949,24 +990,24 @@ class CompanyWorkView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def post(self, request, company_id=None):
-        """Yangi ish kuni qo'shish"""
-        if not is_superadmin_or_admin(request):
+        role = get_auth_role(request)
+
+        if role not in ["superadmin", "admin"]:
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-    
-        company = None
-        if user.role == "admin":
-            company = Company.objects.filter(owner=user).first()
-        elif user.role == "superadmin":
+
+        if role == "superadmin":
             company = Company.objects.filter(id=company_id).first()
-        
+        else:
+            company = get_auth_company(request)
+
         if not company:
             return Response({"detail": "Kompaniya topilmadi."}, status=404)
-        
-        # MUHIM: context qo'shish
+
         serializer = CompanyWorkDaySerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save(company=company)
             return Response(serializer.data, status=201)
+
         return Response(serializer.errors, status=400)
 
 
@@ -991,41 +1032,45 @@ class GetFilialWorkdays(APIView):
 
 
 class CompanyWorkDayCRUDView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         tags=["WorkDay"],
         manual_parameters=[TRANSLATION_HEADER]
     )
     def get(self, request, company_id=None, pk=None):
-        """Ish kunlarini olish"""
-        user = request.user
-        
-        if user.role in ["superadmin", "admin"]:
+        role = get_auth_role(request)
+
+        if role == "superadmin":
             if pk:
                 obj = CompanyWorkDay.objects.filter(id=pk).first()
                 if not obj:
                     return Response({"detail": "Topilmadi"}, status=404)
-                # MUHIM: context qo'shish
                 serializer = CompanyWorkDaySerializer(obj, context={'request': request})
             elif company_id:
                 days = CompanyWorkDay.objects.filter(company_id=company_id)
-                # MUHIM: context qo'shish
                 serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
             else:
                 days = CompanyWorkDay.objects.all()
-                # MUHIM: context qo'shish
                 serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
-        elif user.role == "admin":
-            company = Company.objects.filter(owner=user).first()
+
+        elif role == "admin":
+            company = get_auth_company(request)
             if not company:
                 return Response({"detail": "Sizda kompaniya yo'q."}, status=403)
-            days = CompanyWorkDay.objects.filter(company=company)
-            # MUHIM: context qo'shish
-            serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
+
+            if pk:
+                obj = CompanyWorkDay.objects.filter(id=pk, company=company).first()
+                if not obj:
+                    return Response({"detail": "Topilmadi"}, status=404)
+                serializer = CompanyWorkDaySerializer(obj, context={'request': request})
+            else:
+                days = CompanyWorkDay.objects.filter(company=company)
+                serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
+
         else:
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-        
+
         return Response(serializer.data)
 
     @swagger_auto_schema(
@@ -1034,36 +1079,49 @@ class CompanyWorkDayCRUDView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def patch(self, request, pk):
-        """Ish kunini yangilash"""
-        user = request.user
+        role = get_auth_role(request)
+
         workday = CompanyWorkDay.objects.filter(id=pk).first()
         if not workday:
             return Response({"detail": "Topilmadi."}, status=404)
-        
-        if user.role not in ["superadmin", "admin"] and workday.company.owner != user:
+
+        if role == "admin":
+            company = get_auth_company(request)
+            if not company or workday.company_id != company.id:
+                return Response({"detail": "Ruxsat yo'q."}, status=403)
+
+        elif role != "superadmin":
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-        
-        # MUHIM: context qo'shish
+
         serializer = CompanyWorkDaySerializer(
-            workday, 
-            data=request.data, 
+            workday,
+            data=request.data,
             partial=True,
             context={'request': request}
         )
+
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
+
         return Response(serializer.errors, status=400)
 
     @swagger_auto_schema(tags=["WorkDay"])
     def delete(self, request, pk):
-        """Ish kunini o'chirish"""
-        user = request.user
+        role = get_auth_role(request)
+
         workday = CompanyWorkDay.objects.filter(id=pk).first()
         if not workday:
             return Response({"detail": "Topilmadi."}, status=404)
-        if user.role not in ["superadmin", "admin"] and workday.company.owner != user:
+
+        if role == "admin":
+            company = get_auth_company(request)
+            if not company or workday.company_id != company.id:
+                return Response({"detail": "Ruxsat yo'q."}, status=403)
+
+        elif role != "superadmin":
             return Response({"detail": "Ruxsat yo'q."}, status=403)
+
         workday.delete()
         return Response({"detail": "O'chirildi."}, status=200)
 
@@ -1083,13 +1141,11 @@ class CreateManagerView(APIView):
     )
     def post(self, request, *args, **kwargs):
         """Yangi manager yaratish"""
-        user = request.user
-        if user.role.lower() not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
             })
-        
         # MUHIM: context qo'shish
         serializer = ManagerSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
@@ -1115,61 +1171,63 @@ class LoginView(APIView):
         tags=["Login"]
     )
     def post(self, request, *args, **kwargs):
-        try:
-            serializer = LoginSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-
-            login = serializer.validated_data["login"]
-            password = serializer.validated_data["password"]
-
-            # 1️⃣ Manager ichidan qidiramiz
-            manager = Manager.objects.filter(
-                login=login,
-                password=password
-            ).select_related("user").first()
-
-            if manager:
-                refresh = RefreshToken.for_user(manager.user)
-                return Response({
-                    "message": "Login muvaffaqiyatli (Manager)",
-                    "access": str(refresh.access_token),
-                    "refresh": str(refresh),
-                    "user": {
-                        "id": manager.id,
-                        "role": "manager"
-                    }
-                }, status=status.HTTP_200_OK)
-
-            # 2️⃣ Company ichidan qidiramiz
-            company = Company.objects.filter(
-                login=login,
-                password=password
-            ).select_related("owner").first()
-
-            if company:
-                refresh = RefreshToken.for_user(company.owner)
-                return Response({
-                    "message": "Login muvaffaqiyatli (Admin)",
-                    "access": str(refresh.access_token),
-                    "refresh": str(refresh),
-                    "user": {
-                        "id": company.owner.id,
-                        "role": "admin"
-                    }
-                }, status=status.HTTP_200_OK)
-
-            # 3️⃣ Hech qayerdan topilmadi
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        login = serializer.validated_data["login"]
+        password = serializer.validated_data["password"]
+        manager = Manager.objects.filter(
+            login=login,
+            password=password
+        ).select_related("company", "filial").first()
+        if manager:
+            refresh = RefreshToken()
+            refresh["role"] = "manager"
+            refresh["manager_id"] = manager.id
+            refresh["company_id"] = manager.company.id
+            refresh["filial_id"] = manager.filial.id
+            access = refresh.access_token
+            access["role"] = "manager"
+            access["manager_id"] = manager.id
+            access["company_id"] = manager.company.id
+            access["filial_id"] = manager.filial.id
             return Response({
-                "message": "Login yoki parol noto'g'ri"
-            }, status=status.HTTP_401_UNAUTHORIZED)
+                "message": "Login muvaffaqiyatli (Manager)",
+                "access": str(access),
+                "refresh": str(refresh),
+                "user": {
+                    "id": manager.id,
+                    "username": manager.username,
+                    "role": "manager",
+                    "company_id": manager.company.id,
+                    "filial_id": manager.filial.id,
+                }
+            }, status=status.HTTP_200_OK)
 
-        except Exception as e:
-            import traceback
+        company = Company.objects.filter(
+            login=login,
+            password=password
+        ).first()
+        if company:
+            refresh = RefreshToken()
+            refresh["role"] = "admin"
+            refresh["company_id"] = company.id
+            access = refresh.access_token
+            access["role"] = "admin"
+            access["company_id"] = company.id
             return Response({
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+                "message": "Login muvaffaqiyatli (Admin)",
+                "access": str(access),
+                "refresh": str(refresh),
+                "user": {
+                    "id": company.id,
+                    "name": company.name,
+                    "role": "admin",
+                    "company_id": company.id,
+                }
+            }, status=status.HTTP_200_OK)
+        return Response({
+            "message": "Login yoki parol noto'g'ri"
+        }, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class ManagerCRUDView(APIView):
@@ -1182,8 +1240,7 @@ class ManagerCRUDView(APIView):
     )
     def get(self, request, pk, *args, **kwargs):
         """Bitta manager"""
-        user = request.user
-        if user.role.lower() not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
@@ -1196,7 +1253,6 @@ class ManagerCRUDView(APIView):
                 "Message": "Bunday Manager mavjud emas",
                 "status": status.HTTP_404_NOT_FOUND
             })
-        
         # MUHIM: context qo'shish
         serializer = ManagerCRUDSerializer(manager, context={'request': request})
         return Response({
@@ -1207,8 +1263,7 @@ class ManagerCRUDView(APIView):
     @swagger_auto_schema(tags=["Manager"])
     def delete(self, request, pk, *args, **kwargs):
         """Manager o'chirish"""
-        user = request.user
-        if user.role.lower() not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
@@ -1234,8 +1289,7 @@ class ManagerCRUDView(APIView):
     )
     def patch(self, request, pk, *args, **kwargs):
         """Manager yangilash"""
-        user = request.user
-        if user.role.lower() not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
@@ -1278,8 +1332,7 @@ class GetAllManagerView(APIView):
     )
     def get(self, request, *args, **kwargs):
         """Barcha managerlar"""
-        user = request.user
-        if user.role.lower() not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
