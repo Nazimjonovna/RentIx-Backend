@@ -9,42 +9,49 @@ from .models import (
 # ============== COMPANY ADMIN ==============
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'login', 'created_at']
-    search_fields = ['name', 'name_ru', 'name_en', 'login']
-    list_filter = ['created_at']
-
-    fieldsets = (
-        ("Asosiy ma'lumotlar", {
-            'fields': (
-                'name',
-                'login',
-                'password',
-                'owner',
-                'INN',
-                'diedline_zalog',
-            )
-        }),
-        ("Rus tili (Avtomatik to‘ldiriladi)", {
-            'fields': ('name_ru',),
-            'classes': ('collapse',),
-        }),
-        ("Ingliz tili (Avtomatik to‘ldiriladi)", {
-            'fields': ('name_en',),
-            'classes': ('collapse',),
-        }),
-        ("To‘lov tizimlari", {
-            'fields': (
-                'click_id',
-                'payme_id',
-                'payme_callback_url',
-                'payme_key',
-                'uzum_id',
-            ),
-            'classes': ('collapse',),
-        }),
+    list_display = (
+        "id",
+        "name",
+        "full_name",
+        "phone1",
+        "phone2",
+        "login",
+        "role",
+        "created_at",
     )
 
-    readonly_fields = ['name_ru', 'name_en']
+    fields = (
+        "name",
+        "full_name",
+        "phone1",
+        "phone2",
+        "login",
+        "password",
+        "role",
+        "diedline_zalog",
+        "INN",
+        "click_id",
+        "payme_id",
+        "payme_callback_url",
+        "payme_key",
+        "uzum_id",
+    )
+
+    readonly_fields = ("role", "created_at")
+
+    search_fields = (
+        "name",
+        "full_name",
+        "phone1",
+        "phone2",
+        "login",
+        "INN",
+    )
+
+    list_filter = (
+        "role",
+        "created_at",
+    )
 
 
 
