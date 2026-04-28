@@ -75,6 +75,32 @@ TRANSLATION_HEADER = openapi.Parameter(
 )
 
 
+def get_auth_role(request):
+    token = getattr(request, "auth", None)
+    if token and isinstance(token, dict):
+        role = token.get("role")
+        if role:
+            return str(role).lower()
+    user = getattr(request, "user", None)
+    if user and getattr(user, "is_authenticated", False):
+        role = getattr(user, "role", None)
+        if role:
+            return str(role).lower()
+    return None
+
+
+def is_superadmin_or_admin(request):
+    return get_auth_role(request) in ["superadmin", "admin"]
+
+
+def is_admin_or_manager(request):
+    return get_auth_role(request) in ["admin", "manager"]
+
+
+def is_superadmin_admin_or_manager(request):
+    return get_auth_role(request) in ["superadmin", "admin", "manager"]
+
+
 utc = pytz.timezone(settings.TIME_ZONE)
 min = 1
 def send_sms(phone_number, step_reset=None, change_phone=None):
@@ -243,13 +269,11 @@ class RegisterView(APIView):
         serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
         phone = serializer.validated_data.get('phone')
         code = serializer.validated_data.get('code')
         full_name = serializer.validated_data.get('full_name')
         tg_nick = serializer.validated_data.get('tg_nick')
         telegram_id = serializer.validated_data.get('telegram_id')
-
         # ✅ Telefon raqamni normalize qilamiz (bo‘shliq, + belgini olib tashlaymiz)
         phone = str(phone).strip().replace(' ', '').replace('+', '')
 
@@ -376,22 +400,16 @@ class UsersAllGetView(APIView):
 
     @swagger_auto_schema(tags=["User"])
     def get(self, request, *args, **kwargs):
-        user = request.user
-        if user.role not in ['admin', 'manager']:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bu ma'lumotlar yetarli emas",
                 "status": status.HTTP_403_FORBIDDEN
             })
-
         users = User.objects.all()
         serializer = RegisterSerializer(users, many=True)
-
         data = serializer.data
-
-        # 🔥 id ni qo‘shamiz
         for i, user_obj in enumerate(users):
             data[i]["id"] = user_obj.id
-
         return Response({
             "users": data,
             "status": status.HTTP_200_OK
@@ -583,33 +601,27 @@ class CarCreateView(APIView):
     )
     def post(self, request, *args, **kwargs):
         """Yangi mashina qo'shish"""
-        user = request.user
-        if user.role not in ["admin", "manager"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "message": "Sizda bunday ruxsat yo'q",
                 'status': status.HTTP_403_FORBIDDEN
             })
-
         # Fayl nomlarini olish
         car_image_logo = request.FILES.get('car_image_logo')
         car_image_portfolio = request.FILES.get('car_image_portfolio')
         tex_pasport = request.FILES.get('tex_pasport')
-
         # Fayllar uchun URL olish
         file_urls = {}
-
         if car_image_logo:
             file_urls['car_image_logo'] = self.get_presigned_url(car_image_logo.name)
         if car_image_portfolio:
             file_urls['car_image_portfolio'] = self.get_presigned_url(car_image_portfolio.name)
         if tex_pasport:
             file_urls['tex_pasport'] = self.get_presigned_url(tex_pasport.name)
-
         # Serializerdan foydalanish
         serializer = CarSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             car = serializer.save()
-
             # Fayl URL'larini saqlash
             if 'car_image_logo' in file_urls:
                 car.car_image_logo = file_urls['car_image_logo']['file_url']
@@ -617,10 +629,8 @@ class CarCreateView(APIView):
                 car.car_image_portfolio = file_urls['car_image_portfolio']['file_url']
             if 'tex_pasport' in file_urls:
                 car.tex_pasport = file_urls['tex_pasport']['file_url']
-
             # Fayllarni saqlash
             car.save()
-
             return Response({
                 "Message": "Mashina muvafaqiyatli ravishda qo'shildi",
                 "data": serializer.data,
@@ -686,8 +696,7 @@ class CarCRUDView(APIView):
     )
     def get(self, request, pk, *args, **kwargs):
         """Bitta mashina"""
-        user = request.user
-        if user.role not in ["admin", "manager"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizda bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
@@ -714,8 +723,7 @@ class CarCRUDView(APIView):
     )
     def patch(self, request, pk, *args, **kwargs):
         """Mashinani yangilash"""
-        user = request.user
-        if user.role not in ["admin", "manager"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizda bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
@@ -752,20 +760,17 @@ class CarCRUDView(APIView):
     @swagger_auto_schema(tags=["Car"])
     def delete(self, request, pk, *args, **kwargs):
         """Mashinani o'chirish"""
-        user = request.user
-        if user.role not in ["admin", "manager"]:
+        if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizda bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
             })
-        
         car = Car.objects.filter(id=pk).first()
         if not car:
             return Response({
                 "Message": "Bunday mashina topilmadi",
                 "status": status.HTTP_404_NOT_FOUND
             })
-        
         car.delete()
         return Response({
             "Message": "Mashina muvafaqiyatli o'chirildi",
@@ -785,14 +790,11 @@ class AvailableCarsAPIView(APIView):
 
         start_time = serializer.validated_data["start_time"]
         end_time = serializer.validated_data["end_time"]
-
         busy_car_ids = Order.objects.filter(
             start_time__lt=end_time,
             end_time__gt=start_time
         ).values_list("car_id", flat=True)
-
         cars = Car.objects.exclude(id__in=busy_car_ids)
-
         return Response({
             "count": cars.count(),
             "cars": CarSerializer(cars, many=True).data
@@ -845,7 +847,6 @@ class CashbackTransactionViewSet(viewsets.ViewSet):
         total_earned = user.CashbackTransaction.filter(type="earn").aggregate(total=Sum("amount"))['total'] or 0
         total_spent = user.CashbackTransaction.filter(type="spend").aggregate(total=Sum("amount"))['total'] or 0
         available = total_earned - total_spent
-
         serializer = CashbackTransactionSerializer({
             "total_earned": total_earned,
             "total_spent": total_spent,
@@ -866,10 +867,8 @@ class CreateAdminView(APIView):
     )
     def post(self, request):
         """Yangi kompaniya yaratish"""
-        user = request.user
-        if user.role not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({"detail": "Sizga bunday ruxsat yo'q."}, status=403)
-
         # MUHIM: context qo'shish
         serializer = CreateAdminSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
@@ -888,8 +887,7 @@ class AdminCRUDView(APIView):
     )
     def get(self, request, pk=None):
         """Barcha kompaniyalar yoki bitta kompaniya"""
-        user = request.user
-        if user.role not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({"detail": "Sizga bunday ruxsat yo'q."}, status=403)
 
         if pk:
@@ -912,14 +910,11 @@ class AdminCRUDView(APIView):
     )
     def patch(self, request, pk):
         """Kompaniyani yangilash"""
-        user = request.user
-        if user.role not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({"detail": "Sizga bunday ruxsat yo'q."}, status=403)
-
         company = Company.objects.filter(id=pk).first()
         if not company:
             return Response({"detail": "Bunday kompaniya mavjud emas."}, status=404)
-
         # MUHIM: context qo'shish
         serializer = CreateAdminSerializer(
             company, 
@@ -935,14 +930,11 @@ class AdminCRUDView(APIView):
     @swagger_auto_schema(tags=["Company (Admin CRUD)"])
     def delete(self, request, pk):
         """Kompaniyani o'chirish"""
-        user = request.user
-        if user.role not in ["superadmin", "admin"]:
+        if not is_superadmin_or_admin(request):
             return Response({"detail": "Sizga bunday ruxsat yo'q."}, status=403)
-
         company = Company.objects.filter(id=pk).first()
         if not company:
             return Response({"detail": "Bunday kompaniya mavjud emas."}, status=404)
-
         company.delete()
         return Response({"detail": "Kompaniya o'chirildi."}, status=200)
     
@@ -958,10 +950,9 @@ class CompanyWorkView(APIView):
     )
     def post(self, request, company_id=None):
         """Yangi ish kuni qo'shish"""
-        user = request.user
-        if user.role not in ["admin", "superadmin"]:
+        if not is_superadmin_or_admin(request):
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-        
+    
         company = None
         if user.role == "admin":
             company = Company.objects.filter(owner=user).first()

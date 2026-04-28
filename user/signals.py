@@ -8,6 +8,7 @@ from django.dispatch import receiver
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from googletrans import Translator
+from django.dispatch import receiver
 from .models import (
     Company, Filial, Car, Discount, 
     Notification, BotNotification, CarRate
@@ -20,6 +21,26 @@ translator = Translator()
 # TELEGRAM_API_URL = f"https://t.me/RentiixBot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
 
+
+@receiver(post_save, sender=Notification)
+def send_notification_ws(sender, instance, created, **kwargs):
+    if not created:
+        return
+
+    channel_layer = get_channel_layer()
+    group_name = f"notify_{instance.user.id}"
+
+    async_to_sync(channel_layer.group_send)(
+        group_name,
+        {
+            "type": "notify",
+            "title": instance.title,
+            "message": instance.message,
+            "manager_name": getattr(instance, "manager_name", ""),
+            "created_at": instance.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
+    
 
 @receiver(post_save, sender=Order)
 def update_user_order_count_and_role(sender, instance, created, **kwargs):

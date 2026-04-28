@@ -216,7 +216,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [("redis", 6379)],
         },
     },
 }
@@ -277,28 +277,6 @@ MODELTRANSLATION_DEFAULT_LANGUAGE = 'uz'
 MODELTRANSLATION_LANGUAGES = ('uz', 'ru', 'en')
 MODELTRANSLATION_FALLBACK_LANGUAGES = ('uz', 'ru', 'en')
 
-# LANGUAGE_CODE = 'en'
-
-# LANGUAGES = [
-#     ('en', _('English')),
-#     # ('ar', _('Arabic')),
-#     ('ru', _('Russian')),
-#     ('uz', _('Uzbek')),
-# ]
-
-# PARLER_LANGUAGES = {
-#     None :(
-#         {'code':'en',},
-#         {'code':'ar',},
-#         {'code':'ru',},
-#         {'code':'uz',},
-#     ),
-#     'default':{
-#         'fallbacks':['en'],
-#         'hide_untranslated':False,
-
-#     }
-# }
 
 TIME_ZONE = 'UTC'
 

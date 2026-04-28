@@ -50,14 +50,7 @@ class ValidateSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = (
-            "phone",
-            "code",
-            "full_name",
-            "tg_nick",
-            "telegram_id",
-            "role",
-        )
+        fields = "__all__"
         
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -112,27 +105,7 @@ class CompanySerializer(AutoTranslateMixin, serializers.ModelSerializer):
 
     class Meta:
         model = Company
-        fields = (
-            "id",
-            "name",
-            "name_ru",
-            "name_en",
-            "owner",
-            "login",
-            "password",
-            "created_at",
-            "INN",
-            "click_id",
-            "payme_id",
-            "payme_callback_url",
-            "payme_key",
-            "uzum_id",
-            "diedline_zalog",
-            "work_days",
-            "filials",
-            "phone1",
-            "phone2",
-        )
+        fields = "__all__"
         read_only_fields = ['id', 'created_at', 'name_ru', 'name_en']
         translatable_fields = ['name']
 
@@ -311,15 +284,7 @@ class CreateAdminSerializer(AutoTranslateMixin, serializers.ModelSerializer):
     """
     class Meta:
         model = Company
-        fields = (
-            "id",
-            "name",           # uz
-            "name_ru",        # ru
-            "name_en",        # en
-            "owner",
-            "phone1",
-            "phone2",
-        )
+        fields = "__all__"
         read_only_fields = ['id', 'name_ru', 'name_en']
         translatable_fields = ['name']
 
@@ -334,71 +299,48 @@ class ManagerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Manager
-        fields = [
-            "id",
-            "user",
-            "company",
-            "filial",
-            "role",
-            "work_time",
-            "status",
-            "approwed_by",
-            "login",
-            "password",
-        ]
+        fields = "__all__"
         read_only_fields = ["approwed_by"]
-
-    def validate(self, attrs):
-        user = attrs.get("user")
-        company = attrs.get("company")
-        # User roli manager bo'lishi kerak
-        if user.role != "manager":
-            raise serializers.ValidationError({"user": "User roli manager bo'lishi kerak"})
-        # Bir kompaniyada duplicate manager bo'lishi mumkin emas
-        if Manager.objects.filter(user=user, company=company).exists():
-            raise serializers.ValidationError(
-                "Bu user ushbu kompaniyada allaqachon manager sifatida mavjud"
-            )
-        return attrs
 
     def create(self, validated_data):
         request = self.context.get("request")
-        # Superadmin yaratgan bo'lsa approwed_by avtomatik to'ldiriladi
-        if request and request.user.role.lower() == "superadmin":
+        if request and hasattr(request.user, "role") and request.user.role.lower() == "superadmin":
             validated_data["approwed_by"] = request.user
         return super().create(validated_data)
 
+
     def to_representation(self, instance):
         """
-        Response uchun user va company batafsil ko'rsatish
+        Response uchun manager va company batafsil ko'rsatish
         """
         data = super().to_representation(instance)
-        
-        # User ma'lumotlari
-        data["user"] = {
-            "id": instance.user.id,
-            "full_name": instance.user.full_name,
-            "email": getattr(instance.user, "email", None)
+        # Manager ma'lumotlari
+        data["manager"] = {
+            "id": instance.id,
+            "username": instance.username,
+            "phone": instance.phone,
+            "phone1": instance.phone1,
+            "login": instance.login,
+            "role": instance.role,
+            "status": instance.status,
+            "work_time": instance.work_time,
         }
-        
-        # Company ma'lumotlari (tarjima bilan)
-        request = self.context.get('request')
+        # Company ma'lumotlari tarjima bilan
+        request = self.context.get("request")
         if request:
-            lang = request.headers.get('Accept-Language', 'uz')[:2]
-            if lang == 'ru' and hasattr(instance.company, 'name_ru'):
+            lang = request.headers.get("Accept-Language", "uz")[:2]
+            if lang == "ru" and hasattr(instance.company, "name_ru"):
                 company_name = instance.company.name_ru or instance.company.name
-            elif lang == 'en' and hasattr(instance.company, 'name_en'):
+            elif lang == "en" and hasattr(instance.company, "name_en"):
                 company_name = instance.company.name_en or instance.company.name
             else:
                 company_name = instance.company.name
         else:
             company_name = instance.company.name
-            
         data["company"] = {
             "id": instance.company.id,
             "name": company_name
         }
-        
         return data
 
     
@@ -409,18 +351,7 @@ class ManagerCRUDSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = Manager
-        fields = [
-            "id",
-            "user",
-            "company",
-            "filial",
-            "role",
-            "work_time",
-            "status",
-            "approwed_by",
-            "login",
-            "password",
-        ]
+        fields = "__all__"
         read_only_fields = ["approwed_by", "user", "company", "role"]
     
 

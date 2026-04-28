@@ -64,6 +64,11 @@ CarStatus = [
     ("unavailable", "Unavailable"),
 ]
 
+Status_User = [
+    ('active', 'active'),
+    ('deactive', 'deactive'),
+]
+
 VILOYATLAR = [
     ('andijan', 'Andijon'),
     ('bukhara', 'Buxoro'),
@@ -235,13 +240,8 @@ class Company(models.Model):
     )
     phone1 = models.CharField(validators=[phone_regex],max_length=200)
     phone2 = models.CharField(validators=[phone_regex],max_length=200)
-    owner = models.ForeignKey(
-        'user.User',
-        on_delete=models.CASCADE,
-        limit_choices_to={"role":'admin'},
-        related_name="owned_companies",
-        help_text="Bu kompaniya egasi(Admin)"
-    )
+    full_name = models.TextField()
+    role = models.CharField(choices = USER_ROLES, max_length=500, default="manager", editable=False)
     diedline_zalog = models.PositiveIntegerField(default=72, help_text="Kompaniya zalog muddati (soatlarda)")
     INN = models.CharField(max_length=100, null=True, blank=True)
     click_id = models.CharField(max_length=200, null=True, blank=True)
@@ -257,6 +257,10 @@ class Company(models.Model):
             ("can_view_company_data", "Can view company data"),
             ("can_manage_company", "Can manage company"),
         ]
+        
+    def save(self, *args, **kwargs):
+        self.role = "admin"
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -424,20 +428,17 @@ class Verification(models.Model):
     
     
 class Manager(models.Model):
-    user = models.ForeignKey(
-        'user.User',
-        on_delete = models.CASCADE,
-        related_name="managers",
-        limit_choices_to={"role":"manager"},
-        help_text="Faqat manager roliga ega foydalanuvchilar tanlanadi",
-    )
+    phone_regex = RegexValidator(regex=r'^\+?\d{9,15}$', message="Telefon raqamini +9989XXXXXXXX kabi kiriting!")
+    phone = models.CharField(validators=[phone_regex],max_length=200)
+    phone1 = models.CharField(validators=[phone_regex], max_length=200, null=True, blank=True)
+    username = models.CharField(max_length = 200) 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="managers")
     filial = models.ForeignKey(Filial, on_delete=models.CASCADE, related_name="managers")
-    role = models.CharField(choices = USER_ROLES, max_length=500)
+    role = models.CharField(choices = USER_ROLES, max_length=500, default="manager", editable=False)
     work_time = models.CharField(max_length = 500)
     password = models.TextField(null=True, blank=True)
     login = models.TextField(null=True, blank=True)
-    status = models.CharField(choices = STATUS, max_length=500)
+    status = models.CharField(choices = Status_User, max_length=500)
     approwed_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -454,6 +455,10 @@ class Manager(models.Model):
         permissions = [
             ("can_manage_orders", "can manage company orders"),
         ]
+        
+    def save(self, *args, **kwargs):
+        self.role = "manager"
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.user.full_name} | {self.company} | {self.filial}"
@@ -717,88 +722,6 @@ class Order(models.Model):
                     type="earn",
                     defaults={"amount": cashback_amount}
                 )
-# class Order(models.Model):
-#     user = models.ForeignKey('user.User', on_delete = models.CASCADE, related_name = "order_user")
-#     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='orders')
-#     manager = models.ForeignKey(Manager, on_delete = models.SET_NULL, null=True, blank=True, related_name = "order_manager")
-#     car = models.ForeignKey(Car, on_delete = models.CASCADE)
-#     start_time = models.DateTimeField(default=timezone.now)  # e.g. 2026-10-10 12:00
-#     end_time = models.DateTimeField(default=timezone.now)    # e.g. 2026-10-12 15:00
-#     location_from = models.CharField(choices = Location_ok, max_length=500)
-#     location_to = models.CharField(choices = Location_ok, max_length=500)
-#     airport_VIP = models.BooleanField(default = False)
-#     is_driver = models.BooleanField(default = False)
-#     use_cashback = models.BooleanField(default = False)
-#     status = models.CharField(choices = STATUS, max_length=500)
-#     payment_system = models.CharField(choices = PAYMENT_SYSTEM, max_length=500)
-    
-
-#     class Meta:
-#         permissions = [
-#             ("can_view_company_orders", "Can view company orders"),
-#             ("can_manage_orders", "Can manage orders")
-#         ]
-
-#     def __str__(self):
-#         return f"{self.start_time} dan {self.end_time} gacha {self.user.full_name}"
-
-#     def calculate_cost(self):
-#         """Order uchun umumiy narxni hisoblaydi, driver, VIP, aksiya va cashback bilan"""
-#         car = self.car
-#         duration = self.end_time - self.start_time
-#         total_hours = duration.total_seconds() / 3600
-#         total_days = duration.days + (1 if duration.seconds > 0 else 0)
-#         # Asosiy cost (soatlik yoki kunlik)
-#         if car.cost_hour_tash and total_hours <= 24:
-#             base_cost = total_hours * car.cost_hour_tash
-#         else:
-#             base_cost = total_days * car.cost_day_tash
-#         # Driver va VIP
-#         if self.is_driver:
-#             base_cost += car.cost_driver
-#         if self.airport_VIP:
-#             base_cost += car.airport_VIP_cost
-#         # Aksiya foizi
-#         now = timezone.now()
-#         active_discounts = car.discounts.filter(is_active=True, diedline__gte=now.date())
-#         if active_discounts.exists():
-#             discount = active_discounts.latest('created_at')
-#             base_cost = base_cost * (1 - discount.discount / 100)
-#         # Cashback ishlatish
-#         if self.use_cashback:
-#             user_cashback = self.user.cashback_transactions.filter(type="earn").aggregate(
-#                 total_earned=Sum("amount")
-#             )['total_earned'] or 0
-#             user_spent = self.user.cashback_transactions.filter(type="spend").aggregate(
-#                 total_spent=Sum("amount")
-#             )['total_spent'] or 0
-#             available_cashback = user_cashback - user_spent
-#             if available_cashback > 0:
-#                 cashback_to_use = min(base_cost, available_cashback)
-#                 base_cost -= cashback_to_use
-#                 # Spend transaction yaratish yoki update qilish
-#                 CashbackTransaction.objects.update_or_create(
-#                     user=self.user,
-#                     order=self,
-#                     type="spend",
-#                     defaults={"amount": cashback_to_use}
-#                 )
-#         return round(base_cost, 2)
-
-#     def save(self, *args, **kwargs):
-#         # Order summasini hisoblash
-#         self.cost = self.calculate_cost()
-#         super().save(*args, **kwargs)
-#         # use_cashback=False bo‘lsa, earn cashback yaratish yoki update qilish
-#         if not self.use_cashback:
-#             cashback_amount = self.cost * self.car.cashbeck / 100
-#             if cashback_amount > 0:
-#                 CashbackTransaction.objects.update_or_create(
-#                     user=self.user,
-#                     order=self,
-#                     type="earn",
-#                     defaults={"amount": cashback_amount}
-#                 )
 
 
 class CashbackTransaction(models.Model):
