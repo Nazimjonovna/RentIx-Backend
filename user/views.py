@@ -75,49 +75,76 @@ TRANSLATION_HEADER = openapi.Parameter(
 )
 
 
+def get_token_payload(request):
+    """
+    Authorization header dan tokenni olib decode qiladi
+    """
+    auth = request.META.get("HTTP_AUTHORIZATION", "")
+
+    if not auth.startswith("Bearer "):
+        return {}
+
+    token = auth.split(" ", 1)[1].strip()
+
+    try:
+        access = AccessToken(token)
+        return access.payload
+    except Exception as e:
+        print("TOKEN ERROR:", e)
+        return {}
+
+
 def get_auth_role(request):
-    token = getattr(request, "auth", None)
+    """
+    Token ichidan role ni olish
+    """
+    payload = get_token_payload(request)
+    role = payload.get("role")
 
-    if token:
-        role = token.get("role")
-        if role:
-            return str(role).lower()
-
-    user = getattr(request, "user", None)
-    if user and getattr(user, "is_authenticated", False):
-        role = getattr(user, "role", None)
-        if role:
-            return str(role).lower()
+    if role:
+        return str(role).lower()
 
     return None
 
 
 def get_auth_company(request):
-    token = getattr(request, "auth", None)
-    role = get_auth_role(request)
+    """
+    Admin yoki Manager uchun company ni topadi
+    """
+    payload = get_token_payload(request)
+    role = payload.get("role")
 
     if role == "admin":
-        company_id = token.get("company_id") if token else None
+        company_id = payload.get("company_id")
         return Company.objects.filter(id=company_id).first()
 
     if role == "manager":
-        manager_id = token.get("manager_id") if token else None
-        manager = Manager.objects.filter(id=manager_id).select_related("company").first()
+        manager_id = payload.get("manager_id")
+        manager = Manager.objects.filter(
+            id=manager_id
+        ).select_related("company").first()
+
         return manager.company if manager else None
 
     return None
 
 
 def get_auth_manager(request):
-    token = getattr(request, "auth", None)
-    manager_id = token.get("manager_id") if token else None
+    """
+    Manager ni topadi
+    """
+    payload = get_token_payload(request)
+    manager_id = payload.get("manager_id")
 
-    if manager_id:
-        return Manager.objects.filter(id=manager_id).select_related("company", "filial").first()
+    if not manager_id:
+        return None
 
-    return None
+    return Manager.objects.filter(
+        id=manager_id
+    ).select_related("company", "filial").first()
 
 
+# 🔥 BU IKKALASI QOLADI (sen ishlatgan)
 def is_superadmin_or_admin(request):
     return get_auth_role(request) in ["superadmin", "admin"]
 
@@ -1221,11 +1248,15 @@ class LoginView(APIView):
         
         
 class MeView(APIView):
-    permission_classes = [IsAuthenticated]
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(tags=["Auth"])
     def get(self, request):
         role = get_auth_role(request)
+
+        if not role:
+            return Response({"detail": "Token noto'g'ri yoki yuborilmagan"}, status=401)
 
         if role == "admin":
             company = get_auth_company(request)
@@ -1275,18 +1306,7 @@ class MeView(APIView):
                 }
             })
 
-        user = request.user
-        return Response({
-            "type": "user",
-            "role": user.role,
-            "data": {
-                "id": user.id,
-                "phone": user.phone,
-                "full_name": user.full_name,
-                "role": user.role,
-                "is_blocked": user.is_blocked,
-            }
-        })
+        return Response({"detail": "Role noto'g'ri"}, status=403)
 
 
 class ManagerCRUDView(APIView):
@@ -2442,23 +2462,25 @@ class ViloyatlarViewSet(ModelViewSet):
     
 
 class GetCompaniView(APIView):
-    permission_classes = [IsAuthenticated]
+    authentication_classes = []
+    permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FileUploadParser]
-    
-    @swagger_auto_schema(tag = 'Company')
+
+    @swagger_auto_schema(tag='Company')
     def get(self, request, *args, **kwargs):
-        user = request.user
-        if user.role in ['admin', 'manager']:
-            company = Company.objects.filter(owner = user).first()
+        company = get_auth_company(request)
+
+        if not company:
             return Response({
-                "company_id":company.id,
-                "status":status.HTTP_200_OK
-            })
-        else:
-            return Response({
-                "data":"Siz admin emassiz",
-                "status":status.HTTP_200_OK
-            })
+                "data": "Company topilmadi yoki token noto'g'ri",
+                "status": status.HTTP_403_FORBIDDEN
+            }, status=403)
+
+        return Response({
+            "company_id": company.id,
+            "company_name": company.name,
+            "status": status.HTTP_200_OK
+        })
             
             
 class GetCarModelView(APIView):
