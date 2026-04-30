@@ -60,20 +60,25 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class CompanyWorkDaySerializer(serializers.ModelSerializer):
-    filial_name = serializers.CharField(source="filial.name", read_only=True)  # filial nomini chiqarish
+    weekday_display = serializers.CharField(
+        source="get_weekday_display",
+        read_only=True
+    )
 
     class Meta:
         model = CompanyWorkDay
-        fields = (
+        fields = [
             "id",
-            "day",
+            "company",
+            "filial",
+            "weekday",
+            "weekday_display",
             "start_time",
             "end_time",
             "is_working",
             "is_24_7",
-            "filial",
-            "filial_name",
-        )
+        ]
+        read_only_fields = ["id", "company"]
 
 
 # Filial serializeri
@@ -215,44 +220,16 @@ class CarSerializer(serializers.ModelSerializer):
 
 
 class AvailableCarTimeFilterSerializer(serializers.Serializer):
-         """
-    Foydalanuvchidan mashinalarni qidirish oralig‘ini so‘raydigan serializer.
-    start_time va end_time datetime formatida bo‘lishi kerak.
-    Masalan: 2026-10-10T12:00 yoki 2026-10-10 12:00
-    """
-         start_time = serializers.CharField(required=True)
-         end_time = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-         hours = serializers.IntegerField(required=False, min_value=1)
-
-         def validate(self, attrs):
-            start_time = parse_datetime(attrs.get("start_time"))
-            if not start_time:
-                raise serializers.ValidationError(
-                    {"start_time": "Datetime noto‘g‘ri formatda"}
-                )
-            end_str = attrs.get("end_time")
-            hours = attrs.get("hours")
-            if end_str:
-                end_time = parse_datetime(end_str)
-                if not end_time:
-                    raise serializers.ValidationError(
-                        {"end_time": "Datetime noto‘g‘ri formatda"}
-                    )
-            elif hours:
-                end_time = start_time + timedelta(hours=hours)
-            else:
-                end_time = start_time + timedelta(hours=24)
-            if end_time <= start_time:
-                raise serializers.ValidationError(
-                    {"end_time": "End time start_time dan katta bo‘lishi kerak"}
-                )
-            attrs["start_time"] = start_time
-            attrs["end_time"] = end_time
-            return attrs
+    company = serializers.IntegerField(required=False)
+    filial = serializers.IntegerField(required=True)
+    start_time = serializers.DateTimeField()
+    end_time = serializers.DateTimeField()
 
 
 class AvailableCarModelFilterSerializer(serializers.Serializer):
-    car_model = serializers.CharField(required=True)
+    car_model = serializers.IntegerField()
+    company = serializers.IntegerField(required=False)
+    filial = serializers.IntegerField(required=False)
 
 
 class AvailableCarCostFilterSerializer(serializers.Serializer):

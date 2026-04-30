@@ -144,6 +144,17 @@ Codes = [
 ]
 
 
+WEEKDAYS = (
+    (0, "Dushanba"),
+    (1, "Seshanba"),
+    (2, "Chorshanba"),
+    (3, "Payshanba"),
+    (4, "Juma"),
+    (5, "Shanba"),
+    (6, "Yakshanba"),
+)
+
+
 class UserManager(BaseUserManager):
     """
     create_user: qaysi ma'lumot berilganiga qarab user yaratadi:
@@ -249,6 +260,12 @@ class Company(models.Model):
     payme_callback_url = models.CharField(max_length=500, null=True, blank=True)
     payme_key = models.CharField(max_length=200, null=True, blank=True)     
     uzum_id = models.CharField(max_length=200, null=True, blank=True)
+    waiting_from_airport = models.BooleanField(default=False)
+    waiting_from_air = models.BooleanField(default=False)
+    driver = models.BooleanField(default=False)
+    cost_driver = models.FloatField(default=0)
+    airport_VIP_cost = models.FloatField(default=0)
+    cost_air = models.FloatField(default=0)
 
     class Meta:
         verbose_name = "Company"
@@ -278,7 +295,11 @@ class Filial(models.Model):
     name = models.CharField(max_length=500)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="filials")
     address = models.TextField(null=True, blank=True)
-    phone = models.CharField(max_length=200, null=True, blank=True)
+    phone_regex = RegexValidator(
+        regex=r'^\+?\d{9,15}$',
+        message="Telefon raqamini +9989XXXXXXXX kabi kiriting!"
+    )
+    phone = models.CharField(validators=[phone_regex],max_length=200)
 
     def __str__(self):
         return self.name
@@ -286,9 +307,17 @@ class Filial(models.Model):
 
 # Har bir kompaniya uchun haftalik ish jadvali
 class CompanyWorkDay(models.Model):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="work_days")
-    filial = models.ForeignKey(Filial, on_delete=models.CASCADE, related_name="work_days")
-    day = models.DateField()
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="work_days"
+    )
+    filial = models.ForeignKey(
+        Filial,
+        on_delete=models.CASCADE,
+        related_name="work_days"
+    )
+    weekday = models.IntegerField(choices=WEEKDAYS)
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
     is_working = models.BooleanField(default=True)
@@ -297,26 +326,37 @@ class CompanyWorkDay(models.Model):
     class Meta:
         verbose_name = "Company Work Day"
         verbose_name_plural = "Company Work Days"
-        unique_together = ("filial", "day")  
+        unique_together = ("filial", "weekday")
+        ordering = ["filial", "weekday"]
 
     def clean(self):
-        # 24/7 bo'lsa start_time va end_time bo'lmasligi kerak
-        if self.is_24_7 and (self.start_time or self.end_time):
-            raise ValidationError("24/7 bo'lsa vaqt kiritilmasligi kerak")
-        # Ish kuni va 24/7 bo'lmasa start_time va end_time bo'lishi kerak
-        if self.is_working and not self.is_24_7:
-            if not self.start_time or not self.end_time:
-                raise ValidationError("Ish kuni bo'lsa start va end time bo'lishi kerak")
-        # Eski sanalarni saqlashni oldini olish
-        if self.day < timezone.now().date():
-            raise ValidationError("Sana bugungi kundan oldin bo'lishi mumkin emas")
+        if self.filial and self.company and self.filial.company_id != self.company_id:
+            raise ValidationError("Filial ushbu companyga tegishli emas")
+        if not self.is_working:
+            self.is_24_7 = False
+            self.start_time = None
+            self.end_time = None
+            return
+        if self.is_24_7:
+            self.start_time = None
+            self.end_time = None
+            return
+        if not self.start_time or not self.end_time:
+            raise ValidationError("Ish kuni bo‘lsa start_time va end_time majburiy")
+        if self.start_time >= self.end_time:
+            raise ValidationError("start_time end_time dan oldin bo‘lishi kerak")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        if self.is_24_7:
-            return f"{self.filial.name} — {self.get_day_display()}: 24/7"
+        day_name = self.get_weekday_display()
         if not self.is_working:
-            return f"{self.filial.name} — {self.get_day_display()}: Dam olish"
-        return f"{self.filial.name} — {self.get_day_display()}: {self.start_time}–{self.end_time}"
+            return f"{self.filial.name} — {day_name}: Dam olish"
+        if self.is_24_7:
+            return f"{self.filial.name} — {day_name}: 24/7"
+        return f"{self.filial.name} — {day_name}: {self.start_time} - {self.end_time}"
 
 
 class User(AbstractUser):
@@ -325,7 +365,7 @@ class User(AbstractUser):
         message="Telefon raqamini +9989XXXXXXXX kabi kiriting!"
     )
     phone = models.CharField(validators=[phone_regex],max_length=200, unique=True)
-    phone_tg = models.CharField(null=True, blank=True)                                      #User da tgda boshqa nomer bo'lsa startni bosganda shu yerga tushadi
+    phone_tg = models.CharField(validators = [ phone_regex], max_length=200, null=True, blank=True)                                      #User da tgda boshqa nomer bo'lsa startni bosganda shu yerga tushadi
     telegram_id = models.BigIntegerField(unique= True, null=True, blank=True)
     full_name = models.TextField(null = True, blank = True)
     age = models.IntegerField(null = True, blank = True)
@@ -464,6 +504,10 @@ class Manager(models.Model):
             ("can_manage_orders", "can manage company orders"),
         ]
         
+    def clean(self):
+        if self.filial and self.company and self.filial.company_id != self.company_id:
+            raise ValidationError("Manager filiali ushbu companyga tegishli emas")
+        
     def save(self, *args, **kwargs):
         self.role = "manager"
         super().save(*args, **kwargs)
@@ -561,8 +605,7 @@ class Car(models.Model):
     commit = models.TextField(null=True, blank=True)
     commit_ru = models.TextField(null=True, blank=True)
     commit_en = models.TextField(null=True, blank=True)
-    cost_driver = models.FloatField(default=0)
-    airport_VIP_cost = models.FloatField(default=0)
+    
 # agar VIP emas uchun cost bo'lsa uni ham qo'shish kerak
     class Meta:
         verbose_name = "Car"
@@ -614,23 +657,39 @@ class Discount(models.Model):
     
 #think about order create logic 
 class Order(models.Model):
-    user = models.ForeignKey('user.User', on_delete=models.CASCADE, related_name="order_user")
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='orders')
-    manager = models.ForeignKey(Manager, on_delete=models.SET_NULL, null=True, blank=True, related_name="order_manager")
+    user = models.ForeignKey(
+        'user.User',
+        on_delete=models.CASCADE,
+        related_name="order_user"
+    )
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='orders'
+    )
+    filial = models.ForeignKey(
+        Filial,
+        on_delete=models.CASCADE,
+        related_name="orders"
+    )
+    manager = models.ForeignKey(
+        Manager,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="order_manager"
+    )
     car = models.ForeignKey(Car, on_delete=models.CASCADE)
-
-    start_time = models.DateTimeField(default=timezone.now)
-    end_time = models.DateTimeField(default=timezone.now)
-
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
     location_from = models.CharField(choices=Location_ok, max_length=500)
     location_to = models.CharField(choices=Location_ok, max_length=500)
-
     airport_VIP = models.BooleanField(default=False)
     is_driver = models.BooleanField(default=False)
     use_cashback = models.BooleanField(default=False)
-
     status = models.CharField(choices=STATUS, max_length=500)
     payment_system = models.CharField(choices=PAYMENT_SYSTEM, max_length=500)
+    cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
         permissions = [
@@ -641,45 +700,46 @@ class Order(models.Model):
     def __str__(self):
         return f"{self.start_time} dan {self.end_time} gacha {self.user.full_name}"
 
-    # ================= WORKDAY VALIDATION =================
-
-    def clean(self):
-        """
-        Order vaqtini CompanyWorkDay bilan tekshiradi
-        Agar workday topilmasa -> 24/7 deb qabul qilinadi
-        """
-        order_day = self.start_time.date()
+    def validate_filial_work_time(self, dt):
+        weekday = dt.weekday()
         workday = CompanyWorkDay.objects.filter(
             company=self.company,
-            day=order_day
+            filial=self.filial,
+            weekday=weekday
         ).first()
         if not workday:
-            return  # workday yo'q → 24/7 ishlaydi
-        if workday.is_24_7:
-            return  # 24/7
-        if not workday.is_working:
-            raise ValidationError("Bu kunda filial ishlamaydi")
-        if not workday.start_time or not workday.end_time:
-            return
-        work_start = timezone.make_aware(
-            datetime.combine(workday.day, workday.start_time)
-        )
-        work_end = timezone.make_aware(
-            datetime.combine(workday.day, workday.end_time)
-        )
-        if self.start_time < work_start or self.start_time > work_end:
             raise ValidationError(
-                f"Order boshlanish vaqti ish vaqtidan tashqarida ({workday.start_time}-{workday.end_time})"
+                f"{dt.date()} kuni uchun filial ish vaqti kiritilmagan"
             )
-        if self.end_time < work_start or self.end_time > work_end:
+        if not workday.is_working:
             raise ValidationError(
-                f"Order tugash vaqti ish vaqtidan tashqarida ({workday.start_time}-{workday.end_time})"
+                f"{dt.date()} kuni filial ishlamaydi"
+            )
+        if workday.is_24_7:
+            return
+        current_time = timezone.localtime(dt).time()
+        if current_time < workday.start_time or current_time > workday.end_time:
+            raise ValidationError(
+                f"{dt.date()} kuni filial ish vaqti "
+                f"{workday.start_time} - {workday.end_time}"
             )
 
-    # ================= COST CALCULATION =================
+    def clean(self):
+        if self.filial and self.company and self.filial.company_id != self.company_id:
+            raise ValidationError("Order filiali ushbu companyga tegishli emas")
+        if self.manager:
+            if self.manager.company_id != self.company_id:
+                raise ValidationError("Manager ushbu companyga tegishli emas")
+            if self.manager.filial_id != self.filial_id:
+                raise ValidationError("Manager ushbu filialga tegishli emas")
+        if self.start_time >= self.end_time:
+            raise ValidationError("Boshlanish vaqti tugash vaqtidan oldin bo‘lishi kerak")
+        if self.start_time < timezone.now():
+            raise ValidationError("Boshlanish vaqti hozirgi vaqtdan oldin bo‘lishi mumkin emas")
+        self.validate_filial_work_time(self.start_time)
+        self.validate_filial_work_time(self.end_time)
 
     def calculate_cost(self):
-        """Order uchun umumiy narxni hisoblaydi"""
         car = self.car
         duration = self.end_time - self.start_time
         total_hours = duration.total_seconds() / 3600
@@ -705,12 +765,12 @@ class Order(models.Model):
                 type="earn"
             ).aggregate(
                 total_earned=Sum("amount")
-            )['total_earned'] or 0
+            )["total_earned"] or 0
             user_spent = self.user.cashback_transactions.filter(
                 type="spend"
             ).aggregate(
                 total_spent=Sum("amount")
-            )['total_spent'] or 0
+            )["total_spent"] or 0
             available_cashback = user_cashback - user_spent
             if available_cashback > 0:
                 cashback_to_use = min(base_cost, available_cashback)
@@ -722,8 +782,6 @@ class Order(models.Model):
                     defaults={"amount": cashback_to_use}
                 )
         return round(base_cost, 2)
-
-    # ================= SAVE =================
 
     def save(self, *args, **kwargs):
         self.full_clean()

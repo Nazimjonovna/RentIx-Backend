@@ -484,7 +484,7 @@ class OrderPageView(APIView): # user va company uchun alohida qilishim kerak
 
 
 class OrderCreateView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(request_body=OrderSerializer, tags=["Order"])
     def post(self, request):
@@ -499,50 +499,88 @@ class OrderCreateView(APIView):
             context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-        order = serializer.save()
+        order = serializer.save(user=user)
         return Response(
             {
                 "message": "Buyurtma muvaffaqiyatli yaratildi",
-                "data": OrderSerializer(order).data
+                "data": OrderSerializer(order, context={"request": request}).data
             },
             status=status.HTTP_201_CREATED
         )
 
 
 class GetOwnAllOrderView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(tags=["Order"])
-    def get(self, request, pk):
-        user = get_object_or_404(User, id=pk)
-        orders = Order.objects.filter(user=user)
+    def get(self, request):
+        orders = Order.objects.filter(
+            user=request.user
+        ).order_by("-id")
         serializer = OrderSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class GetCompanyAllOrderView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(tags=["Order"])
-    def get(self, request, pk):
-        company = get_object_or_404(Company, id=pk)
-        orders = Order.objects.filter(company=company)
+    def get(self, request, pk=None):
+        role = get_auth_role(request)
+        if role == "superadmin":
+            company = get_object_or_404(Company, id=pk)
+        elif role == "admin":
+            company = get_auth_company(request)
+            if not company:
+                return Response({"detail": "Company topilmadi"}, status=404)
+        elif role == "manager":
+            manager = get_auth_manager(request)
+            if not manager:
+                return Response({"detail": "Manager topilmadi"}, status=404)
+            orders = Order.objects.filter(
+                company=manager.company,
+                filial=manager.filial
+            ).order_by("-id")
+            serializer = OrderSerializer(orders, many=True)
+            return Response(serializer.data, status=200)
+        else:
+            return Response({"detail": "Ruxsat yo'q"}, status=403)
+        orders = Order.objects.filter(
+            company=company
+        ).order_by("-id")
         serializer = OrderSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
         
 
 class OrderChangeView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         return get_object_or_404(Order, id=pk)
 
+    def check_order_permission(self, request, order):
+        role = get_auth_role(request)
+        if role == "superadmin":
+            return True
+        if role == "admin":
+            company = get_auth_company(request)
+            return company and order.company_id == company.id
+        if role == "manager":
+            manager = get_auth_manager(request)
+            return (
+                manager and
+                order.company_id == manager.company_id and
+                order.filial_id == manager.filial_id
+            )
+        return order.user_id == request.user.id
+
     @swagger_auto_schema(tags=["Order"])
     def get(self, request, pk):
         order = self.get_object(pk)
+        if not self.check_order_permission(request, order):
+            return Response({"detail": "Ruxsat yo'q"}, status=403)
         serializer = OrderSerializer(order)
-        return Response(serializer.data)
-
+        return Response(serializer.data, status=200)
 
     @swagger_auto_schema(request_body=OrderSerializer, tags=["Order"])
     def patch(self, request, pk):
@@ -552,6 +590,8 @@ class OrderChangeView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         order = self.get_object(pk)
+        if not self.check_order_permission(request, order):
+            return Response({"detail": "Ruxsat yo'q"}, status=403)
         serializer = OrderSerializer(
             order,
             data=request.data,
@@ -564,9 +604,9 @@ class OrderChangeView(APIView):
             {
                 "message": "Order muvaffaqiyatli o'zgartirildi",
                 "data": serializer.data
-            }
+            },
+            status=200
         )
-
 
     @swagger_auto_schema(tags=["Order"])
     def delete(self, request, pk):
@@ -576,10 +616,12 @@ class OrderChangeView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         order = self.get_object(pk)
+        if not self.check_order_permission(request, order):
+            return Response({"detail": "Ruxsat yo'q"}, status=403)
         order.delete()
         return Response(
             {"message": "Buyurtma o'chirildi"},
-            status=status.HTTP_204_NO_CONTENT
+            status=status.HTTP_200_OK
         )
 
 import uuid
@@ -819,41 +861,97 @@ class CarCRUDView(APIView):
 
 
 class AvailableCarsAPIView(APIView):
+    permission_classes = [AllowAny]
 
-    @swagger_auto_schema(request_body=AvailableCarTimeFilterSerializer, tag = ['Filtercars'])
+    @swagger_auto_schema(
+        request_body=AvailableCarTimeFilterSerializer,
+        tags=["Filtercars"]
+    )
     def post(self, request):
-        serializer = AvailableCarTimeFilterSerializer(
-            data=request.query_params
-        )
+        serializer = AvailableCarTimeFilterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         start_time = serializer.validated_data["start_time"]
         end_time = serializer.validated_data["end_time"]
+        filial_id = serializer.validated_data.get("filial")
+        company_id = serializer.validated_data.get("company")
+        if start_time >= end_time:
+            return Response(
+                {"detail": "start_time end_time dan oldin bo‘lishi kerak"},
+                status=400
+            )
+        filial = Filial.objects.filter(id=filial_id).first()
+        if not filial:
+            return Response({"detail": "Filial topilmadi"}, status=404)
+        company = filial.company
+        if company_id and company.id != company_id:
+            return Response(
+                {"detail": "Filial ushbu companyga tegishli emas"},
+                status=400
+            )
+
+        def check_filial_work_time(dt):
+            workday = CompanyWorkDay.objects.filter(
+                company=company,
+                filial=filial,
+                weekday=dt.weekday()
+            ).first()
+            if not workday:
+                return False, f"{dt.date()} kuni uchun ish vaqti kiritilmagan"
+            if not workday.is_working:
+                return False, f"{dt.date()} kuni filial ishlamaydi"
+            if workday.is_24_7:
+                return True, None
+            current_time = timezone.localtime(dt).time()
+            if current_time < workday.start_time or current_time > workday.end_time:
+                return False, (
+                    f"{dt.date()} kuni ish vaqti "
+                    f"{workday.start_time} - {workday.end_time}"
+                )
+            return True, None
+        ok, error = check_filial_work_time(start_time)
+        if not ok:
+            return Response({"detail": error}, status=400)
+        ok, error = check_filial_work_time(end_time)
+        if not ok:
+            return Response({"detail": error}, status=400)
         busy_car_ids = Order.objects.filter(
             start_time__lt=end_time,
             end_time__gt=start_time
         ).values_list("car_id", flat=True)
-        cars = Car.objects.exclude(id__in=busy_car_ids)
+        cars = Car.objects.filter(
+            company=company,
+            filial=filial
+        ).exclude(
+            id__in=busy_car_ids
+        )
         return Response({
             "count": cars.count(),
             "cars": CarSerializer(cars, many=True).data
-        })
+        }, status=200)
 
 
 class AvailableCarModelFilterView(APIView):
-    
-    @swagger_auto_schema(request_body=AvailableCarModelFilterSerializer, tag = ["Filtercars"])
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        request_body=AvailableCarModelFilterSerializer,
+        tags=["Filtercars"]
+    )
     def post(self, request):
-        serializer = AvailableCarModelFilterSerializer(
-            data=request.query_params
-        )
+        serializer = AvailableCarModelFilterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         car_model = serializer.validated_data["car_model"]
+        company_id = serializer.validated_data.get("company")
+        filial_id = serializer.validated_data.get("filial")
         cars = Car.objects.filter(car_model=car_model)
+        if company_id:
+            cars = cars.filter(company_id=company_id)
+        if filial_id:
+            cars = cars.filter(filial_id=filial_id)
         return Response({
             "count": cars.count(),
             "cars": CarSerializer(cars, many=True).data
-        })
+        }, status=200)
 
 
 class CarCostFilterAPIView(APIView):
@@ -989,44 +1087,60 @@ class CompanyWorkView(APIView):
     )
     def post(self, request, company_id=None):
         role = get_auth_role(request)
-
         if role not in ["superadmin", "admin"]:
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-
         if role == "superadmin":
             company = Company.objects.filter(id=company_id).first()
         else:
             company = get_auth_company(request)
-
         if not company:
             return Response({"detail": "Kompaniya topilmadi."}, status=404)
-
-        serializer = CompanyWorkDaySerializer(data=request.data, context={'request': request})
+        filial_id = request.data.get("filial")
+        filial = Filial.objects.filter(id=filial_id, company=company).first()
+        if not filial:
+            return Response({"detail": "Filial topilmadi yoki bu kompaniyaga tegishli emas."}, status=404)
+        weekday = request.data.get("weekday")
+        if CompanyWorkDay.objects.filter(
+            company=company,
+            filial=filial,
+            weekday=weekday
+        ).exists():
+            return Response(
+                {"detail": "Bu filial uchun ushbu hafta kuni allaqachon kiritilgan."},
+                status=400
+            )
+        serializer = CompanyWorkDaySerializer(
+            data=request.data,
+            context={"request": request}
+        )
         if serializer.is_valid():
-            serializer.save(company=company)
+            serializer.save(company=company, filial=filial)
             return Response(serializer.data, status=201)
-
         return Response(serializer.errors, status=400)
 
 
 class GetFilialWorkdays(APIView):
-    permission_classess = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
-    @swagger_auto_schema(tags=["WorkDay"],manual_parameters=[TRANSLATION_HEADER])
+    @swagger_auto_schema(
+        tags=["WorkDay"],
+        manual_parameters=[TRANSLATION_HEADER]
+    )
     def get(self, request, pk, *args, **kwargs):
-        filial = Filial.objects.filter(id = pk).first()
-        if filial:
-            workdays = CompanyWorkDay.objects.filter(filial = filial).all()
-            serializer = CompanyWorkDaySerializer(workdays, many = True)
+        filial = Filial.objects.filter(id=pk).first()
+        if not filial:
             return Response({
-                "data":serializer.data,
-                "status": status.HTTP_200_OK
-            })
-        else:
-            return Response({
-                "data":"Bunday filial yoq",
-                "status":status.HTTP_404_NOT_FOUND
-            })
+                "data": "Bunday filial yo'q",
+                "status": status.HTTP_404_NOT_FOUND
+            }, status=404)
+        workdays = CompanyWorkDay.objects.filter(
+            filial=filial
+        ).order_by("weekday")
+        serializer = CompanyWorkDaySerializer(workdays, many=True)
+        return Response({
+            "data": serializer.data,
+            "status": status.HTTP_200_OK
+        }, status=200)
 
 
 class CompanyWorkDayCRUDView(APIView):
@@ -1038,38 +1152,62 @@ class CompanyWorkDayCRUDView(APIView):
     )
     def get(self, request, company_id=None, pk=None):
         role = get_auth_role(request)
-
         if role == "superadmin":
             if pk:
                 obj = CompanyWorkDay.objects.filter(id=pk).first()
                 if not obj:
                     return Response({"detail": "Topilmadi"}, status=404)
-                serializer = CompanyWorkDaySerializer(obj, context={'request': request})
+                serializer = CompanyWorkDaySerializer(
+                    obj,
+                    context={"request": request}
+                )
             elif company_id:
-                days = CompanyWorkDay.objects.filter(company_id=company_id)
-                serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
+                days = CompanyWorkDay.objects.filter(
+                    company_id=company_id
+                ).order_by("filial_id", "weekday")
+                serializer = CompanyWorkDaySerializer(
+                    days,
+                    many=True,
+                    context={"request": request}
+                )
             else:
-                days = CompanyWorkDay.objects.all()
-                serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
-
+                days = CompanyWorkDay.objects.all().order_by(
+                    "company_id",
+                    "filial_id",
+                    "weekday"
+                )
+                serializer = CompanyWorkDaySerializer(
+                    days,
+                    many=True,
+                    context={"request": request}
+                )
         elif role == "admin":
             company = get_auth_company(request)
             if not company:
                 return Response({"detail": "Sizda kompaniya yo'q."}, status=403)
-
             if pk:
-                obj = CompanyWorkDay.objects.filter(id=pk, company=company).first()
+                obj = CompanyWorkDay.objects.filter(
+                    id=pk,
+                    company=company
+                ).first()
                 if not obj:
                     return Response({"detail": "Topilmadi"}, status=404)
-                serializer = CompanyWorkDaySerializer(obj, context={'request': request})
+                serializer = CompanyWorkDaySerializer(
+                    obj,
+                    context={"request": request}
+                )
             else:
-                days = CompanyWorkDay.objects.filter(company=company)
-                serializer = CompanyWorkDaySerializer(days, many=True, context={'request': request})
-
+                days = CompanyWorkDay.objects.filter(
+                    company=company
+                ).order_by("filial_id", "weekday")
+                serializer = CompanyWorkDaySerializer(
+                    days,
+                    many=True,
+                    context={"request": request}
+                )
         else:
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-
-        return Response(serializer.data)
+        return Response(serializer.data, status=200)
 
     @swagger_auto_schema(
         request_body=CompanyWorkDaySerializer,
@@ -1078,51 +1216,66 @@ class CompanyWorkDayCRUDView(APIView):
     )
     def patch(self, request, pk):
         role = get_auth_role(request)
-
         workday = CompanyWorkDay.objects.filter(id=pk).first()
         if not workday:
             return Response({"detail": "Topilmadi."}, status=404)
-
         if role == "admin":
             company = get_auth_company(request)
             if not company or workday.company_id != company.id:
                 return Response({"detail": "Ruxsat yo'q."}, status=403)
-
         elif role != "superadmin":
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-
+        filial_id = request.data.get("filial")
+        weekday = request.data.get("weekday")
+        if filial_id:
+            filial = Filial.objects.filter(
+                id=filial_id,
+                company=workday.company
+            ).first()
+            if not filial:
+                return Response(
+                    {"detail": "Filial topilmadi yoki bu kompaniyaga tegishli emas."},
+                    status=404
+                )
+        final_filial_id = filial_id or workday.filial_id
+        final_weekday = weekday if weekday is not None else workday.weekday
+        if CompanyWorkDay.objects.filter(
+            company=workday.company,
+            filial_id=final_filial_id,
+            weekday=final_weekday
+        ).exclude(id=workday.id).exists():
+            return Response(
+                {"detail": "Bu filial uchun ushbu hafta kuni allaqachon mavjud."},
+                status=400
+            )
         serializer = CompanyWorkDaySerializer(
             workday,
             data=request.data,
             partial=True,
-            context={'request': request}
+            context={"request": request}
         )
-
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
-
+            return Response(serializer.data, status=200)
         return Response(serializer.errors, status=400)
 
-    @swagger_auto_schema(tags=["WorkDay"])
+    @swagger_auto_schema(
+        tags=["WorkDay"],
+        manual_parameters=[TRANSLATION_HEADER]
+    )
     def delete(self, request, pk):
         role = get_auth_role(request)
-
         workday = CompanyWorkDay.objects.filter(id=pk).first()
         if not workday:
             return Response({"detail": "Topilmadi."}, status=404)
-
         if role == "admin":
             company = get_auth_company(request)
             if not company or workday.company_id != company.id:
                 return Response({"detail": "Ruxsat yo'q."}, status=403)
-
         elif role != "superadmin":
             return Response({"detail": "Ruxsat yo'q."}, status=403)
-
         workday.delete()
         return Response({"detail": "O'chirildi."}, status=200)
-
 
 
 # manager yaratish ko'rilishi kk va rate ing sistem qo'shilishi kk sharhlar ham
