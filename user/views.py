@@ -32,7 +32,7 @@ from django.utils.translation import gettext_lazy as _
 from .click_auth import click_authorization
 from .status import *
 from rest_framework.decorators import action
-
+from django.contrib.auth.hashers import make_password, check_password
 from .models import (
     ChekInOut, Filial, Filial, User, Company, Manager, CarImage, UserImage, Car, Order, ValidatedCode, Verification, Rate,
     ChatMessage, Chat, Notification, CompanyWorkDay, CarRate, CompanySubscription, Payment,
@@ -326,33 +326,24 @@ class RegisterView(APIView):
         full_name = serializer.validated_data.get('full_name')
         tg_nick = serializer.validated_data.get('tg_nick')
         telegram_id = serializer.validated_data.get('telegram_id')
-        # ✅ Telefon raqamni normalize qilamiz (bo‘shliq, + belgini olib tashlaymiz)
         phone = str(phone).strip().replace(' ', '').replace('+', '')
-
-        # ✅ Telegram nick tekshiruvi
         if tg_nick and not tg_nick.startswith('@'):
             return Response({
                 "status": False,
                 "detail": _("Telegram nick '@' bilan boshlanishi kerak.")
             }, status=status.HTTP_400_BAD_REQUEST)
-
-        # ✅ Telefon raqami SMS orqali tasdiqlanganmi?
         verify = ValidatedCode.objects.filter(phone__iexact=phone, validated=True)
-        print("✅ ValidatedCode check:", verify)
+        print("ValidatedCode check:", verify)
         if not verify.exists():
             return Response({
                 "status": False,
                 "detail": _("Telefon raqami SMS orqali tasdiqlanmagan.")
             }, status=status.HTTP_400_BAD_REQUEST)
-
-        # ✅ Agar foydalanuvchi allaqachon mavjud bo‘lsa
         if User.objects.filter(phone=phone).exists():
             return Response({
                 "status": False,
                 "detail": _("Bu telefon raqam avval ro'yhatdan o'tgan.")
             }, status=status.HTTP_400_BAD_REQUEST)
-
-        # ✅ Foydalanuvchini yaratamiz
         try:
             user_obj = User.objects.create_user(
                 phone=phone,
@@ -362,11 +353,8 @@ class RegisterView(APIView):
                 telegram_id = telegram_id,
                 is_phone_verified=True
             )
-
-            # ✅ JWT tokenlar yaratamiz
             access_token = AccessToken.for_user(user_obj)
             refresh_token = RefreshToken.for_user(user_obj)
-
             return Response({
                 "status": True,
                 "message": _("Muvafaqqiyatli ro'yhatdan o'tdingiz."),
@@ -378,9 +366,8 @@ class RegisterView(APIView):
                 "access": str(access_token),
                 "refresh": str(refresh_token),
             }, status=status.HTTP_201_CREATED)
-
         except Exception as e:
-            print(f"❌ Register error: {e}")
+            print(f"Register error: {e}")
             return Response({
                 "status": False,
                 "detail": _("So'rovingizni bajarishda xatolik yuz berdi."),
@@ -1151,27 +1138,31 @@ class CreateManagerView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def post(self, request, *args, **kwargs):
-        """Yangi manager yaratish"""
         if not is_superadmin_or_admin(request):
             return Response({
                 "Message": "Sizga bunday ruxsat yo'q",
                 "status": status.HTTP_403_FORBIDDEN
             })
-        # MUHIM: context qo'shish
-        serializer = ManagerSerializer(data=request.data, context={'request': request})
+
+        data = request.data.copy()
+
+        if data.get("password"):
+            data["password"] = make_password(data["password"])
+        serializer = ManagerSerializer(data=data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
+            response_data = serializer.data
+            response_data.pop("password", None)
             return Response({
                 "Message": "Manager muvaffaqiyatli yaratildi",
-                "data": serializer.data,
+                "data": response_data,
                 "status": status.HTTP_201_CREATED
             })
-        else:
-            return Response({
-                'error': serializer.errors,
-                "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
-                'status': status.HTTP_400_BAD_REQUEST
-            })
+        return Response({
+            'error': serializer.errors,
+            "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
+            'status': status.HTTP_400_BAD_REQUEST
+        })
 
 
 class LoginView(APIView):
@@ -1186,11 +1177,10 @@ class LoginView(APIView):
         password = serializer.validated_data["password"]
 
         manager = Manager.objects.filter(
-            login=login,
-            password=password
+        login=login
         ).select_related("company", "filial").first()
 
-        if manager:
+        if manager and check_password(password, manager.password):
             refresh = RefreshToken()
             refresh["role"] = "manager"
             refresh["manager_id"] = manager.id
@@ -1209,7 +1199,7 @@ class LoginView(APIView):
                 "refresh": str(refresh),
                 "user": {
                     "id": manager.id,
-                    "username": manager.username,
+                    "username": manager.full_name,
                     "role": "manager",
                     "company_id": manager.company_id,
                     "filial_id": manager.filial_id,
@@ -1288,7 +1278,7 @@ class MeView(APIView):
                 "role": "manager",
                 "data": {
                     "id": manager.id,
-                    "username": manager.username,
+                    "username": manager.full_name,
                     "phone": manager.phone,
                     "phone1": manager.phone1,
                     "login": manager.login,

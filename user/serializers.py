@@ -284,7 +284,7 @@ class CreateAdminSerializer(AutoTranslateMixin, serializers.ModelSerializer):
     class Meta:
         model = Company
         fields = "__all__"
-        read_only_fields = ['id', 'name_ru', 'name_en']
+        read_only_fields = ['id', 'name_ru', 'name_en', 'password']
         translatable_fields = ['name']
 
 
@@ -295,7 +295,7 @@ class ManagerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Manager
         fields = "__all__"
-        read_only_fields = ["approwed_by", "role"]
+        read_only_fields = ["approwed_by", "role", 'password']
 
     def create(self, validated_data):
         request = self.context.get("request")
@@ -312,7 +312,6 @@ class ManagerSerializer(serializers.ModelSerializer):
 
         data["manager"] = {
             "id": instance.id,
-            "username": instance.username,
             "phone": instance.phone,
             "phone1": instance.phone1,
             "login": instance.login,
@@ -342,7 +341,7 @@ class ManagerCRUDSerializer(serializers.ModelSerializer):
     class Meta:
         model = Manager
         fields = "__all__"
-        read_only_fields = ["approwed_by", "role"]
+        read_only_fields = ["approwed_by", "role", 'password']
     
 
 class LoginSerializer(serializers.Serializer):

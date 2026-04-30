@@ -439,7 +439,6 @@ class Manager(models.Model):
     phone_regex = RegexValidator(regex=r'^\+?\d{9,15}$', message="Telefon raqamini +9989XXXXXXXX kabi kiriting!")
     phone = models.CharField(validators=[phone_regex],max_length=200)
     phone1 = models.CharField(validators=[phone_regex], max_length=200, null=True, blank=True)
-    username = models.CharField(max_length = 200) 
     full_name = models.TextField()
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="managers")
     filial = models.ForeignKey(Filial, on_delete=models.CASCADE, related_name="managers")
