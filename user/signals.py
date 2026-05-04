@@ -11,7 +11,7 @@ from googletrans import Translator
 from django.dispatch import receiver
 from .models import (
     Company, Filial, Car, Discount, 
-    Notification, BotNotification, CarRate
+    Notification, BotNotification, CarRate, CarModel, CarBrand,
 )
 
 # Google Translator instance
@@ -138,18 +138,34 @@ def translate_text(text, dest_lang):
         return text
 
 
+@receiver(pre_save, sender=CarBrand)
+def car_brand_auto_translate(sender, instance, **kwargs):
+    if instance.name:
+        if not instance.name_ru:
+            instance.name_ru = translate_text(instance.name, "ru")
+
+        if not instance.name_en:
+            instance.name_en = translate_text(instance.name, "en")
+
+
+@receiver(pre_save, sender=CarModel)
+def car_model_auto_translate(sender, instance, **kwargs):
+    if instance.name:
+        if not instance.name_ru:
+            instance.name_ru = translate_text(instance.name, "ru")
+
+        if not instance.name_en:
+            instance.name_en = translate_text(instance.name, "en")
+
+
 @receiver(pre_save, sender=Car)
 def car_auto_translate(sender, instance, **kwargs):
-    print(">>> Pre-save signal ishlayapti <<<")
-    # car_name
-    if instance.car_name:
-        instance.car_name_ru = translate_text(instance.car_name, 'ru')
-        instance.car_name_en = translate_text(instance.car_name, 'en')
-
-    # commit
     if instance.commit:
-        instance.commit_ru = translate_text(instance.commit, 'ru')
-        instance.commit_en = translate_text(instance.commit, 'en')
+        if not instance.commit_ru:
+            instance.commit_ru = translate_text(instance.commit, "ru")
+
+        if not instance.commit_en:
+            instance.commit_en = translate_text(instance.commit, "en")
 
 # ============== COMPANY MODEL TRANSLATION ==============
 @receiver(pre_save, sender=Company)

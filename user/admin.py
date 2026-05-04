@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     Notification, ChatMessage, Chat, Rate, Order, Car, CarImage, UserImage,
     Manager, Verification, ValidatedCode, User, CompanyWorkDay, Company,
-    CompanySubscription, Transaction, Viloyatlar, CarRate, BotNotification, Filial
+    CompanySubscription, Transaction, Viloyatlar, CarRate, BotNotification, Filial, CarModel, CarBrand
 )
 
 
@@ -82,8 +82,8 @@ class FilialAdmin(admin.ModelAdmin):
 # ============== CAR ADMIN ==============
 @admin.register(Car)
 class CarAdmin(admin.ModelAdmin):
-    list_display = ('car_name', 'car_model', 'status', 'created')
-    search_fields = ('car_name',)
+    list_display = ('model', 'brand', 'status', 'created')
+    search_fields = ('model',)
     list_filter = ('status',)
 
     readonly_fields = ()  # bu yerda RU/EN yo‘Q
@@ -91,8 +91,8 @@ class CarAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Asosiy ma'lumotlar", {
             'fields': (
-                'car_name',
-                'car_model',
+                'model',
+                'brand',
                 'car_number',
                 'commit',
             )
@@ -180,6 +180,75 @@ class CarRateAdmin(admin.ModelAdmin):
                        'company_reply_ru', 'company_reply_en']
 
 
+@admin.register(CarBrand)
+class CarBrandAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "name_ru",
+        "name_en",
+    )
+
+    search_fields = (
+        "name",
+        "name_ru",
+        "name_en",
+    )
+
+    ordering = ("name",)
+
+    fieldsets = (
+        ("O'zbek tili (Asosiy)", {
+            "fields": ("name",)
+        }),
+        ("Rus tili", {
+            "fields": ("name_ru",),
+            "classes": ("collapse",),
+        }),
+        ("Ingliz tili", {
+            "fields": ("name_en",),
+            "classes": ("collapse",),
+        }),
+    )
+    
+    
+@admin.register(CarModel)
+class CarModelAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "brand",
+        "name_ru",
+        "name_en",
+    )
+
+    search_fields = (
+        "name",
+        "name_ru",
+        "name_en",
+        "brand__name",
+    )
+
+    list_filter = (
+        "brand",
+    )
+
+    ordering = ("brand__name", "name")
+
+    fieldsets = (
+        ("Asosiy", {
+            "fields": ("brand", "name")
+        }),
+        ("Rus tili", {
+            "fields": ("name_ru",),
+            "classes": ("collapse",),
+        }),
+        ("Ingliz tili", {
+            "fields": ("name_en",),
+            "classes": ("collapse",),
+        }),
+    )
+
 # ============== QOLGAN MODELLAR (oddiy registratsiya) ==============
 admin.site.register(ChatMessage)
 admin.site.register(Chat)
@@ -194,6 +263,8 @@ admin.site.register(User)
 admin.site.register(CompanyWorkDay)
 admin.site.register(CompanySubscription)
 admin.site.register(Viloyatlar)
+# admin.site.register(CarBrand)
+# admin.site.register(CarModel)
 
 # Transaction admin (agar kerak bo'lsa uncommment qiling)
 # class TransactionAdmin(admin.ModelAdmin):

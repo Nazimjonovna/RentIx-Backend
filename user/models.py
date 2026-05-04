@@ -10,18 +10,6 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 
-MODEL = [
-    ("chevrolet_cobalt", "Chevrolet Cobalt"),
-    ("chevrolet_damas", "Chevrolet Damas"),
-    ("chevrolet_tracker", "Chevrolet Tracker"),
-    ("chevrolet_onix", "Chevrolet Onix"),
-    ("chevrolet_labo", "Chevrolet Labo"),
-    ("chevrolet_lacetti", "Chevrolet Lacetti"),
-    ("kia_sonet", "KIA Sonet"),
-    ("byd_song_plus_champion", "BYD Song Plus Champion"),
-    ("byd_chazor", "BYD Chazor"),
-    ("chery_tiggo", "Chery Tiggo"),
-]
 
 COLOR = [
     ("white", "White"),
@@ -522,17 +510,6 @@ class Manager(models.Model):
 
     def __str__(self):
         return f"{self.full_name} | {self.company} | {self.filial}"
-    
-
-class CarImage(models.Model):
-    image = models.FileField(upload_to='car-images/')
-
-    class Meta:
-        verbose_name = "Image"
-        verbose_name_plural = "Images"
-        permissions = [
-            ("can_manage_images", "Can manage images"),
-        ]
 
 
 class Viloyatlar(models.Model):
@@ -542,6 +519,38 @@ class Viloyatlar(models.Model):
 
     def __str__(self):
         return self.viloyat
+    
+
+class CarBrand(models.Model):
+    name = models.CharField(max_length=200, unique=True)
+    name_ru = models.CharField(max_length=200, null=True, blank=True)
+    name_en = models.CharField(max_length=200, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Car Brand"
+        verbose_name_plural = "Car Brands"
+
+    def __str__(self):
+        return self.name
+
+
+class CarModel(models.Model):
+    brand = models.ForeignKey(
+        CarBrand,
+        on_delete=models.CASCADE,
+        related_name="models"
+    )
+    name = models.CharField(max_length=200)
+    name_ru = models.CharField(max_length=200, null=True, blank=True)
+    name_en = models.CharField(max_length=200, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Car Model"
+        verbose_name_plural = "Car Models"
+        unique_together = ("brand", "name")
+
+    def __str__(self):
+        return f"{self.brand.name} {self.name}"
 
 
 class Car(models.Model):
@@ -571,12 +580,8 @@ class Car(models.Model):
     )
     depozit = models.FloatField(default=0)
     is_discount = models.BooleanField(default=False)
-    car_model = models.CharField(choices=MODEL, max_length=500)
-    car_name = models.CharField(
-        max_length=500,
-        null=True,
-        blank=True
-    )
+    brand = models.ForeignKey(CarBrand, on_delete=models.PROTECT, related_name="cars_brands")
+    model = models.ForeignKey(CarModel, on_delete=models.PROTECT, related_name="cars_models")
     car_name_ru = models.CharField(max_length=500, null=True, blank=True)
     car_name_en = models.CharField(max_length=500, null=True, blank=True)
     car_code = models.CharField(
@@ -592,12 +597,6 @@ class Car(models.Model):
     )
     car_image_logo = models.URLField(null=True, blank=True)
     car_image_portfolio = models.URLField(null=True, blank=True)
-    car_image = models.ForeignKey(
-        CarImage,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True
-    )
     tex_pasport = models.URLField(null=True, blank=True)
     status = models.CharField(choices=CarStatus, max_length=500)
     created = models.DateTimeField(auto_now_add=True)
@@ -621,6 +620,18 @@ class Car(models.Model):
     def get_logo_url(self):
         model_name = self.car_model.lower()
         return static(f'{model_name}.png')
+
+
+class CarImage(models.Model):
+    image = models.FileField(upload_to='car-images/')
+    car = models.ForeignKey(Car, on_delete=models.CASCADE)
+
+    class Meta:
+        verbose_name = "Image"
+        verbose_name_plural = "Images"
+        permissions = [
+            ("can_manage_images", "Can manage images"),
+        ]
 
 
 class Discount(models.Model):

@@ -13,7 +13,7 @@ from .translation_helper import AutoTranslateMixin
 from .models import (
     Filial, User, Company, CompanyWorkDay, Manager, CarImage, UserImage, Car, Order, ValidatedCode, Verification, Discount, 
     Rate, Chat, ChatMessage, Notification, CarRate, Payment, CompanySubscription, Plan, PLAN_PRICES, BotNotification, CashbackTransaction,
-    ImagesCheckOut, ImagesCheckIn, ChekInOut, Viloyatlar,
+    ImagesCheckOut, ImagesCheckIn, ChekInOut, Viloyatlar,CarBrand, CarModel,
 )
 
 User = get_user_model()
@@ -188,6 +188,43 @@ class OrderSerializer(serializers.ModelSerializer):
         return instance
 
 
+class CarBrandSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CarBrand
+        fields = [
+            "id",
+            "name",
+            "name_ru",
+            "name_en",
+        ]
+
+
+class CarModelSerializer(serializers.ModelSerializer):
+    brand_name = serializers.CharField(source="brand.name", read_only=True)
+    class Meta:
+        model = CarModel
+        fields = [
+            "id",
+            "brand",
+            "brand_name",
+            "name",
+            "name_ru",
+            "name_en",
+        ]
+
+    def validate(self, attrs):
+        brand = attrs.get("brand")
+        name = attrs.get("name")
+        qs = CarModel.objects.filter(brand=brand, name__iexact=name)
+        if self.instance:
+            qs = qs.exclude(id=self.instance.id)
+        if qs.exists():
+            raise serializers.ValidationError({
+                "name": "Bu brand ichida bunday model allaqachon mavjud"
+            })
+
+        return attrs
+
 
 class CarSerializer(serializers.ModelSerializer):
     # Fayllar uchun URL'lar
@@ -198,7 +235,7 @@ class CarSerializer(serializers.ModelSerializer):
     class Meta:
         model = Car
         fields = "__all__"
-        read_only_fields = ['id', 'created', 'updated', 'car_name_ru', 'car_name_en', 'commit_ru', 'commit_en']
+        read_only_fields = ['id', 'company', 'created', 'updated', 'car_name_ru', 'car_name_en', 'commit_ru', 'commit_en']
 
     # car_image_logo URL'sini olish uchun metod
     def get_car_image_logo_url(self, obj):
@@ -747,7 +784,7 @@ class CheckInOutSerializer(serializers.ModelSerializer):
 class CarImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = CarImage
-        fields = ('id', 'image')
+        fields = '__all__'
         read_only_fields = ('id',)
 
 

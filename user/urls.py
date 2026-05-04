@@ -19,8 +19,8 @@ from .views import (
     # Car
     CarCreateView, AvailableCarsAPIView, GetAllCarView, CarCRUDView,
     AvailableCarModelFilterView, CarCostFilterAPIView,DiscountView,
-    GetAllCarView,CarImageAPIView,CarImageDetailAPIView,ViloyatlarViewSet,
-    GetCarModelView,GenerateUploadURL,
+    GetAllCarView,CarImageAPIView,CarImageByCarAPIView,ViloyatlarViewSet,
+    GetCarModelView,GenerateUploadURL,CarImageDeleteAPIView,
 
     # Admin & Manager
     CreateAdminView, CompanyWorkDayCRUDView, CreateManagerView, ManagerCRUDView,
@@ -40,7 +40,7 @@ from .views import (
     CompanySubscriptionAPIView,
 
     # Bot Notification
-    BotNotificationViewSet,MeView, 
+    BotNotificationViewSet,MeView, CarBrandListView, CarModelListView,
 )
 
 # Router for ViewSets
@@ -84,11 +84,12 @@ urlpatterns = [
     path("filter-car-cost/", CarCostFilterAPIView.as_view(), name="filter-car-cost"),
     path("discount/", DiscountView.as_view(), name="discount"),
     path("car-images/", CarImageAPIView.as_view(), name="car-images"),
-    path("car-images/<int:pk>/", CarImageDetailAPIView.as_view(), name="car-image-detail"),
+    path("car-images/<int:pk>/", CarImageByCarAPIView.as_view(), name="car-image-detail"),
     path("viloyatlar/", ViloyatlarViewSet.as_view({'get': 'list', 'post': 'create'}), name="viloyatlar"),
     path("viloyatlar/<int:pk>/", ViloyatlarViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name="viloyat-detail"),
     path("get/model/portfolio/cars/", GetCarModelView.as_view()),
     path('generate-upload-url/', GenerateUploadURL.as_view(), name='generate-upload-url'),
+    path("car-images/<int:pk>/delete/", CarImageDeleteAPIView.as_view()),
 
     # 🔹 Admin & Manager
     path("companies/", CreateAdminView.as_view(), name="create-admin"), 
@@ -123,6 +124,8 @@ urlpatterns = [
     path('click/', ClickUzMerchantAPIView.as_view()),
     
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("car-brands/", CarBrandListView.as_view()),
+    path("car-models/", CarModelListView.as_view()),
 
     # # 🔹 Company Subscriptions
     # path('company/subscriptions/', CompanySubscriptionAPIView.as_view(), name='company-subscriptions'),
