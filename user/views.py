@@ -1159,139 +1159,101 @@ class GetFilialWorkdays(APIView):
 
 
 class CompanyWorkDayCRUDView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
+
+    def get_filial(self, filial_id):
+        return Filial.objects.filter(id=filial_id).first()
 
     @swagger_auto_schema(
         tags=["WorkDay"],
         manual_parameters=[TRANSLATION_HEADER]
     )
-    def get(self, request, company_id=None, pk=None):
-        role = get_auth_role(request)
-        if role == "superadmin":
-            if pk:
-                obj = CompanyWorkDay.objects.filter(id=pk).first()
-                if not obj:
-                    return Response({"detail": "Topilmadi"}, status=404)
-                serializer = CompanyWorkDaySerializer(
-                    obj,
-                    context={"request": request}
-                )
-            elif company_id:
-                days = CompanyWorkDay.objects.filter(
-                    company_id=company_id
-                ).order_by("filial_id", "weekday")
-                serializer = CompanyWorkDaySerializer(
-                    days,
-                    many=True,
-                    context={"request": request}
-                )
-            else:
-                days = CompanyWorkDay.objects.all().order_by(
-                    "company_id",
-                    "filial_id",
-                    "weekday"
-                )
-                serializer = CompanyWorkDaySerializer(
-                    days,
-                    many=True,
-                    context={"request": request}
-                )
-        elif role == "admin":
-            company = get_auth_company(request)
-            if not company:
-                return Response({"detail": "Sizda kompaniya yo'q."}, status=403)
-            if pk:
-                obj = CompanyWorkDay.objects.filter(
-                    id=pk,
-                    company=company
-                ).first()
-                if not obj:
-                    return Response({"detail": "Topilmadi"}, status=404)
-                serializer = CompanyWorkDaySerializer(
-                    obj,
-                    context={"request": request}
-                )
-            else:
-                days = CompanyWorkDay.objects.filter(
-                    company=company
-                ).order_by("filial_id", "weekday")
-                serializer = CompanyWorkDaySerializer(
-                    days,
-                    many=True,
-                    context={"request": request}
-                )
-        else:
-            return Response({"detail": "Ruxsat yo'q."}, status=403)
-        return Response(serializer.data, status=200)
+    def get(self, request, filial_id):
+        filial = self.get_filial(filial_id)
 
-    @swagger_auto_schema(
-        request_body=CompanyWorkDaySerializer,
-        tags=["WorkDay"],
-        manual_parameters=[TRANSLATION_HEADER]
-    )
-    def patch(self, request, pk):
-        role = get_auth_role(request)
-        workday = CompanyWorkDay.objects.filter(id=pk).first()
-        if not workday:
-            return Response({"detail": "Topilmadi."}, status=404)
-        if role == "admin":
-            company = get_auth_company(request)
-            if not company or workday.company_id != company.id:
-                return Response({"detail": "Ruxsat yo'q."}, status=403)
-        elif role != "superadmin":
-            return Response({"detail": "Ruxsat yo'q."}, status=403)
-        filial_id = request.data.get("filial")
-        weekday = request.data.get("weekday")
-        if filial_id:
-            filial = Filial.objects.filter(
-                id=filial_id,
-                company=workday.company
-            ).first()
-            if not filial:
-                return Response(
-                    {"detail": "Filial topilmadi yoki bu kompaniyaga tegishli emas."},
-                    status=404
-                )
-        final_filial_id = filial_id or workday.filial_id
-        final_weekday = weekday if weekday is not None else workday.weekday
-        if CompanyWorkDay.objects.filter(
-            company=workday.company,
-            filial_id=final_filial_id,
-            weekday=final_weekday
-        ).exclude(id=workday.id).exists():
-            return Response(
-                {"detail": "Bu filial uchun ushbu hafta kuni allaqachon mavjud."},
-                status=400
-            )
+        if not filial:
+            return Response({"detail": "Filial topilmadi"}, status=404)
+
+        workdays = CompanyWorkDay.objects.filter(
+            filial=filial
+        ).order_by("weekday")
+
         serializer = CompanyWorkDaySerializer(
-            workday,
-            data=request.data,
-            partial=True,
+            workdays,
+            many=True,
             context={"request": request}
         )
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=200)
-        return Response(serializer.errors, status=400)
+
+        return Response({
+            "filial": {
+                "id": filial.id,
+                "name": filial.name,
+                "phone": filial.phone,
+                "address": filial.address,
+            },
+            "work_days": serializer.data
+        }, status=200)
 
     @swagger_auto_schema(
+        request_body=CompanyWorkDaySerializer(many=True),
         tags=["WorkDay"],
         manual_parameters=[TRANSLATION_HEADER]
     )
-    def delete(self, request, pk):
-        role = get_auth_role(request)
-        workday = CompanyWorkDay.objects.filter(id=pk).first()
-        if not workday:
-            return Response({"detail": "Topilmadi."}, status=404)
-        if role == "admin":
-            company = get_auth_company(request)
-            if not company or workday.company_id != company.id:
-                return Response({"detail": "Ruxsat yo'q."}, status=403)
-        elif role != "superadmin":
-            return Response({"detail": "Ruxsat yo'q."}, status=403)
-        workday.delete()
-        return Response({"detail": "O'chirildi."}, status=200)
+    def patch(self, request, filial_id):
+        filial = self.get_filial(filial_id)
 
+        if not filial:
+            return Response({"detail": "Filial topilmadi"}, status=404)
+
+        data = request.data
+
+        if not isinstance(data, list):
+            return Response(
+                {"detail": "Ma'lumot list ko‘rinishida yuborilishi kerak"},
+                status=400
+            )
+
+        updated_items = []
+
+        for item in data:
+            weekday = item.get("weekday")
+
+            if weekday is None:
+                return Response(
+                    {"detail": "weekday majburiy"},
+                    status=400
+                )
+
+            workday = CompanyWorkDay.objects.filter(
+                filial=filial,
+                weekday=weekday
+            ).first()
+
+            if not workday:
+                return Response(
+                    {"detail": f"{weekday} weekday uchun workday topilmadi"},
+                    status=404
+                )
+
+            serializer = CompanyWorkDaySerializer(
+                workday,
+                data=item,
+                partial=True,
+                context={"request": request}
+            )
+
+            serializer.is_valid(raise_exception=True)
+            serializer.save(
+                company=filial.company,
+                filial=filial
+            )
+
+            updated_items.append(serializer.data)
+
+        return Response({
+            "message": "Ish vaqtlari yangilandi",
+            "data": updated_items
+        }, status=200)
 
 # manager yaratish ko'rilishi kk va rate ing sistem qo'shilishi kk sharhlar ham
 
@@ -2347,10 +2309,38 @@ class FilialView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def get(self, request):
-        """Barcha filiallar"""
-        filials = Filial.objects.all()
-        # MUHIM: context qo'shish
-        serializer = FilialSerializer(filials, many=True, context={'request': request})
+        """
+        Faqat token egasiga tegishli filiallar
+        """
+        role = get_auth_role(request)
+        if role == "superadmin":
+            filials = Filial.objects.all()
+        elif role == "admin":
+            company = get_auth_company(request)
+            if not company:
+                return Response(
+                    {"detail": "Company topilmadi"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            filials = Filial.objects.filter(company=company)
+        elif role == "manager":
+            manager = get_auth_manager(request)
+            if not manager:
+                return Response(
+                    {"detail": "Manager topilmadi"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            filials = Filial.objects.filter(company=manager.company)
+        else:
+            return Response(
+                {"detail": "Ruxsat yo'q"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        serializer = FilialSerializer(
+            filials,
+            many=True,
+            context={'request': request}
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
@@ -2359,9 +2349,28 @@ class FilialView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def post(self, request):
-        """Yangi filial yaratish"""
-        # MUHIM: context qo'shish
-        serializer = FilialSerializer(data=request.data, context={'request': request})
+        """
+        Yangi filial yaratish
+        """
+        role = get_auth_role(request)
+        if role not in ["admin", "superadmin"]:
+            return Response(
+                {"detail": "Ruxsat yo'q"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        data = request.data.copy()
+        if role == "admin":
+            company = get_auth_company(request)
+            if not company:
+                return Response(
+                    {"detail": "Company topilmadi"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            data["company"] = company.id
+        serializer = FilialSerializer(
+            data=data,
+            context={'request': request}
+        )
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2371,77 +2380,69 @@ class FilialDetailView(APIView):
     permission_classes = [IsAuthenticated]
     serializer_class = FilialSerializer
 
+    def get_object(self, request, pk):
+        role = get_auth_role(request)
+
+        if role == "superadmin":
+            return Filial.objects.filter(id=pk).first()
+        if role == "admin":
+            company = get_auth_company(request)
+            if not company:
+                return None
+            return Filial.objects.filter(
+                id=pk,
+                company=company
+            ).first()
+        if role == "manager":
+            manager = get_auth_manager(request)
+            if not manager:
+                return None
+            return Filial.objects.filter(
+                id=pk,
+                company=manager.company
+            ).first()
+        return None
+
     @swagger_auto_schema(
-        tags=['Filial'],
+        tags=["Filial"],
         manual_parameters=[TRANSLATION_HEADER]
     )
     def get(self, request, pk):
-        """Bitta filial"""
-        filial = Filial.objects.filter(id=pk).first()
+        filial = self.get_object(request, pk)
+
         if not filial:
             return Response(
-                {"detail": "Filial not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": "Filial topilmadi yoki sizga ruxsat yo'q"},
+                status=404
             )
-        # MUHIM: context qo'shish
-        serializer = FilialSerializer(filial, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        serializer = FilialSerializer(
+            filial,
+            context={"request": request}
+        )
+        return Response(serializer.data, status=200)
 
     @swagger_auto_schema(
         request_body=FilialSerializer,
-        tags=['Filial'],
-        manual_parameters=[TRANSLATION_HEADER]
-    )
-    def put(self, request, pk):
-        """Filialni yangilash (to'liq)"""
-        filial = Filial.objects.filter(id=pk).first()
-        if not filial:
-            return Response(
-                {"detail": "Filial not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        # MUHIM: context qo'shish
-        serializer = FilialSerializer(filial, data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    @swagger_auto_schema(
-        request_body=FilialSerializer,
-        tags=['Filial'],
+        tags=["Filial"],
         manual_parameters=[TRANSLATION_HEADER]
     )
     def patch(self, request, pk):
-        """Filialni yangilash (qisman)"""
-        filial = Filial.objects.filter(id=pk).first()
+        filial = self.get_object(request, pk)
+
         if not filial:
             return Response(
-                {"detail": "Filial not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": "Filial topilmadi yoki sizga ruxsat yo'q"},
+                status=404
             )
-        # MUHIM: context qo'shish
         serializer = FilialSerializer(
-            filial, 
-            data=request.data, 
+            filial,
+            data=request.data,
             partial=True,
-            context={'request': request}
+            context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    @swagger_auto_schema(tags=['Filial'])
-    def delete(self, request, pk):
-        """Filialni o'chirish"""
-        filial = Filial.objects.filter(id=pk).first()
-        if not filial:
-            return Response(
-                {"detail": "Filial not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        filial.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    
+        return Response(serializer.data, status=200)
 
 class CarImageAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]

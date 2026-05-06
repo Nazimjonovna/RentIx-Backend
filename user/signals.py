@@ -189,19 +189,6 @@ def auto_translate_filial(sender, instance, **kwargs):
         instance.address_en = translate_text(instance.address, 'en')
 
 
-# # ============== CAR MODEL TRANSLATION ==============
-# @receiver(pre_save, sender=Car)
-# def auto_translate_car(sender, instance, **kwargs):
-#     """Car modelini avtomatik tarjima qiladi"""
-#     if instance.car_name and not instance.car_name_ru:
-#         instance.car_name_ru = translate_text(instance.car_name, 'ru')
-#         instance.car_name_en = translate_text(instance.car_name, 'en')
-    
-#     if instance.commit and not instance.commit_ru:
-#         instance.commit_ru = translate_text(instance.commit, 'ru')
-#         instance.commit_en = translate_text(instance.commit, 'en')
-
-
 # ============== DISCOUNT MODEL TRANSLATION ==============
 @receiver(pre_save, sender=Discount)
 def auto_translate_discount(sender, instance, **kwargs):
@@ -252,3 +239,16 @@ def auto_translate_car_rate(sender, instance, **kwargs):
     if instance.company_reply and not instance.company_reply_ru:
         instance.company_reply_ru = translate_text(instance.company_reply, 'ru')
         instance.company_reply_en = translate_text(instance.company_reply, 'en')
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+from .models import Company
+from .services import create_default_filial_and_workdays
+
+
+@receiver(post_save, sender=Company)
+def create_company_default_data(sender, instance, created, **kwargs):
+    if created:
+        create_default_filial_and_workdays(instance)

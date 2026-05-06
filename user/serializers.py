@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from .exceptions import IncorrectAmount, PerformTransactionDoesNotExist
 from django.contrib.auth import get_user_model
 from .translation_helper import AutoTranslateMixin
+from .services import create_default_filial_and_workdays
 from .models import (
     Filial, User, Company, CompanyWorkDay, Manager, CarImage, UserImage, Car, Order, ValidatedCode, Verification, Discount, 
     Rate, Chat, ChatMessage, Notification, CarRate, Payment, CompanySubscription, Plan, PLAN_PRICES, BotNotification, CashbackTransaction,
@@ -116,19 +117,23 @@ class CompanySerializer(AutoTranslateMixin, serializers.ModelSerializer):
 
     def create(self, validated_data):
         instance = super().create(validated_data)
-        # Mixin methodini chaqirish
         self.TRANSLATE_FIELDS = getattr(self.Meta, 'translatable_fields', [])
         self.auto_translate(instance)
-        instance.save(update_fields=[f"{f}_ru" for f in self.TRANSLATE_FIELDS] +
-                      [f"{f}_en" for f in self.TRANSLATE_FIELDS])
+        instance.save(
+            update_fields=[f"{f}_ru" for f in self.TRANSLATE_FIELDS] +
+                          [f"{f}_en" for f in self.TRANSLATE_FIELDS]
+        )
+        create_default_filial_and_workdays(instance)
         return instance
 
     def update(self, instance, validated_data):
         instance = super().update(instance, validated_data)
         self.TRANSLATE_FIELDS = getattr(self.Meta, 'translatable_fields', [])
         self.auto_translate(instance)
-        instance.save(update_fields=[f"{f}_ru" for f in self.TRANSLATE_FIELDS] +
-                      [f"{f}_en" for f in self.TRANSLATE_FIELDS])
+        instance.save(
+            update_fields=[f"{f}_ru" for f in self.TRANSLATE_FIELDS] +
+                          [f"{f}_en" for f in self.TRANSLATE_FIELDS]
+        )
         return instance
 
 
