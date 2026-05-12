@@ -275,14 +275,14 @@ class CarSerializer(serializers.ModelSerializer):
                 fields.append(field)
         return fields
 
-    def build_absolute_file_url(self, file_field):
-        if not file_field:
+    def build_absolute_file_url(self, file_value):
+        if not file_value:
             return None
         request = self.context.get("request")
         try:
-            url = file_field.url
+            url = file_value.url
         except Exception:
-            url = str(file_field)
+            url = str(file_value)
         if not url:
             return None
         if url.startswith("http://") or url.startswith("https://"):
@@ -310,11 +310,7 @@ class CarSerializer(serializers.ModelSerializer):
         )
 
     def get_car_images(self, obj):
-        try:
-            images = CarImage.objects.filter(car=obj).order_by("id")
-        except Exception:
-            return []
-
+        images = CarImage.objects.filter(car=obj).order_by("id")
         return CarImageSerializer(
             images,
             many=True,
@@ -843,8 +839,11 @@ class CarImageSerializer(serializers.ModelSerializer):
         try:
             url = image.url
         except Exception:
+            url = str(image)
+        if not url:
             return None
-
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
         if request:
             return request.build_absolute_uri(url)
         return url

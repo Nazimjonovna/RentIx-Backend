@@ -76,6 +76,61 @@ TRANSLATION_HEADER = openapi.Parameter(
 )
 
 
+def get_user_company(user):
+    role = getattr(user, "role", None)
+    if role == "admin":
+        return user
+    if role == "manager":
+        company = getattr(user, "company", None)
+        if company:
+            return company
+        company_id = getattr(user, "company_id", None)
+        if company_id:
+            return Company.objects.filter(id=company_id).first()
+    return None
+
+
+def user_can_access_car(user, car):
+    role = getattr(user, "role", None)
+    if role == "superadmin":
+        return True
+    company = get_user_company(user)
+    if not company:
+        return False
+    return getattr(car, "company_id", None) == getattr(company, "id", None)
+
+
+def build_spaces_public_url(file_key):
+    custom_domain = getattr(settings, "AWS_S3_CUSTOM_DOMAIN", None)
+    if custom_domain:
+        return f"https://{custom_domain}/{file_key}"
+    endpoint = settings.AWS_S3_ENDPOINT_URL.rstrip("/")
+    bucket = settings.AWS_STORAGE_BUCKET_NAME
+    return f"{endpoint}/{bucket}/{file_key}"
+
+
+def upload_file_to_spaces(file_obj, folder="car_images"):
+    ext = file_obj.name.split(".")[-1].lower()
+    unique_name = f"{uuid.uuid4()}.{ext}"
+    file_key = f"{folder}/{unique_name}"
+    s3 = boto3.client(
+        "s3",
+        region_name=settings.AWS_S3_REGION_NAME,
+        endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    )
+    s3.upload_fileobj(
+        file_obj,
+        settings.AWS_STORAGE_BUCKET_NAME,
+        file_key,
+        ExtraArgs={
+            "ACL": "public-read",
+            "ContentType": file_obj.content_type,
+        }
+    )
+    return build_spaces_public_url(file_key)
+
 def get_token_payload(request):
     """
     Authorization header dan tokenni olib decode qiladi
@@ -631,7 +686,7 @@ class GenerateUploadURL(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     @swagger_auto_schema(
-        operation_description="Rasm yuklash",
+        operation_description="Rasmni server orqali Spaces/S3 ga yuklash va file_url qaytarish",
         manual_parameters=[
             openapi.Parameter(
                 "file",
@@ -644,32 +699,28 @@ class GenerateUploadURL(APIView):
         tags=["Upload"]
     )
     def post(self, request):
-        file = request.FILES.get("file")
-        if not file:
-            return Response({"error": "File required"}, status=400)
-        ext = file.name.split(".")[-1]
-        unique_name = f"{uuid.uuid4()}.{ext}"
-        file_key = f"car_images/{unique_name}"
-        s3 = boto3.client(
-            "s3",
-            region_name=settings.AWS_S3_REGION_NAME,
-            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"error": "File required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            file_url = upload_file_to_spaces(file_obj, folder="car_images")
+        except Exception as e:
+            return Response(
+                {
+                    "error": "Upload failed",
+                    "detail": str(e),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        return Response(
+            {
+                "file_url": file_url,
+            },
+            status=status.HTTP_200_OK
         )
-        s3.upload_fileobj(
-            file,
-            settings.AWS_STORAGE_BUCKET_NAME,
-            file_key,
-            ExtraArgs={
-                "ACL": "public-read",
-                "ContentType": file.content_type
-            }
-        )
-        file_url = f"{settings.AWS_S3_ENDPOINT_URL}/{settings.AWS_STORAGE_BUCKET_NAME}/{file_key}"
-        return Response({
-            "file_url": file_url
-        }, status=status.HTTP_200_OK)
 
 
 class CarCreateView(APIView):
@@ -682,136 +733,171 @@ class CarCreateView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def post(self, request, *args, **kwargs):
-        """Yangi mashina qo'shish"""
         auth_user = request.user
-        if getattr(auth_user, "role", None) == "admin":
+        role = getattr(auth_user, "role", None)
+        if role == "admin":
             company = auth_user
-        elif getattr(auth_user, "role", None) == "manager":
-            company = auth_user.company
-        elif getattr(auth_user, "role", None) == "superadmin":
+        elif role == "manager":
+            company = getattr(auth_user, "company", None)
+            if not company:
+                return Response(
+                    {
+                        "message": "Manager company topilmadi",
+                        "status": status.HTTP_404_NOT_FOUND,
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        elif role == "superadmin":
             company_id = request.data.get("company")
             if not company_id:
-                return Response({
-                    "message": "Superadmin uchun company majburiy",
-                    "status": status.HTTP_400_BAD_REQUEST
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "message": "Superadmin uchun company majburiy",
+                        "status": status.HTTP_400_BAD_REQUEST,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             company = Company.objects.filter(id=company_id).first()
             if not company:
-                return Response({
-                    "message": "Company topilmadi",
-                    "status": status.HTTP_404_NOT_FOUND
-                }, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {
+                        "message": "Company topilmadi",
+                        "status": status.HTTP_404_NOT_FOUND,
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
         else:
-            return Response({
-                "message": "Sizda bunday ruxsat yo'q",
-                "status": status.HTTP_403_FORBIDDEN
-            }, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {
+                    "message": "Sizda bunday ruxsat yo'q",
+                    "status": status.HTTP_403_FORBIDDEN,
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        data = request.data.copy()
         car_image_logo = request.FILES.get("car_image_logo")
         car_image_portfolio = request.FILES.get("car_image_portfolio")
         tex_pasport = request.FILES.get("tex_pasport")
-        file_urls = {}
-        if car_image_logo:
-            file_urls["car_image_logo"] = self.get_presigned_url(car_image_logo.name)
-        if car_image_portfolio:
-            file_urls["car_image_portfolio"] = self.get_presigned_url(car_image_portfolio.name)
-        if tex_pasport:
-            file_urls["tex_pasport"] = self.get_presigned_url(tex_pasport.name)
+        try:
+            if car_image_logo:
+                data["car_image_logo"] = upload_file_to_spaces(
+                    car_image_logo,
+                    folder="car_images"
+                )
+            if car_image_portfolio:
+                data["car_image_portfolio"] = upload_file_to_spaces(
+                    car_image_portfolio,
+                    folder="car_images"
+                )
+            if tex_pasport:
+                data["tex_pasport"] = upload_file_to_spaces(
+                    tex_pasport,
+                    folder="car_documents"
+                )
+        except Exception as e:
+            return Response(
+                {
+                    "message": "Fayl upload qilishda xato",
+                    "error": str(e),
+                    "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         serializer = CarSerializer(
-            data=request.data,
+            data=data,
             context={"request": request}
         )
         if serializer.is_valid():
             car = serializer.save(company=company)
-            if "car_image_logo" in file_urls:
-                car.car_image_logo = file_urls["car_image_logo"]["file_url"]
-            if "car_image_portfolio" in file_urls:
-                car.car_image_portfolio = file_urls["car_image_portfolio"]["file_url"]
-            if "tex_pasport" in file_urls:
-                car.tex_pasport = file_urls["tex_pasport"]["file_url"]
-            car.save()
-            return Response({
-                "Message": "Mashina muvafaqiyatli ravishda qo'shildi",
-                "data": CarSerializer(car, context={"request": request}).data,
-                "status": status.HTTP_201_CREATED
-            }, status=status.HTTP_201_CREATED)
-        return Response({
-            "error": serializer.errors,
-            "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
-            "status": status.HTTP_400_BAD_REQUEST
-        }, status=status.HTTP_400_BAD_REQUEST)
-
-    def get_presigned_url(self, file_name):
-        """Presigned URL yaratish"""
-        session = boto3.session.Session()
-        client = session.client(
-            "s3",
-            region_name=settings.AWS_S3_REGION_NAME,
-            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        )
-        file_key = f"car_images/{file_name}"
-        url = client.generate_presigned_url(
-            "put_object",
-            Params={
-                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
-                "Key": file_key,
-                "ACL": "public-read"
+            return Response(
+                {
+                    "Message": "Mashina muvafaqiyatli ravishda qo'shildi",
+                    "data": CarSerializer(
+                        car,
+                        context={"request": request}
+                    ).data,
+                    "status": status.HTTP_201_CREATED,
+                },
+                status=status.HTTP_201_CREATED
+            )
+        return Response(
+            {
+                "error": serializer.errors,
+                "message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
+                "status": status.HTTP_400_BAD_REQUEST,
             },
-            ExpiresIn=3600
+            status=status.HTTP_400_BAD_REQUEST
         )
-        return {
-            "upload_url": url,
-            "file_url": f"{settings.MEDIA_URL}{file_key}"
-        }
 
 
 class GetAllCarView(APIView):
-    permission_classes = [AllowAny, ]
+    permission_classes = [AllowAny]
+
     @swagger_auto_schema(
         tags=["Car"],
         manual_parameters=[TRANSLATION_HEADER]
     )
     def get(self, request, *args, **kwargs):
-        """Barcha mashinalar"""
-        cars = Car.objects.all()
-        # MUHIM: context qo'shish
-        serializer = CarSerializer(cars, many=True, context={'request': request})
-        return Response({
-            "cars": serializer.data,
-            "status": status.HTTP_200_OK
-        })
+        cars = Car.objects.all().order_by("-id")
+        serializer = CarSerializer(
+            cars,
+            many=True,
+            context={"request": request}
+        )
+        return Response(
+            {
+                "cars": serializer.data,
+                "status": status.HTTP_200_OK,
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class CarCRUDView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FileUploadParser]
+    parser_classes = [MultiPartParser, FormParser, FileUploadParser]
+
+    def get_car_object(self, request, pk):
+        car = Car.objects.filter(id=pk).first()
+        if not car:
+            return None
+        if not user_can_access_car(request.user, car):
+            return "forbidden"
+        return car
 
     @swagger_auto_schema(
         tags=["Car"],
         manual_parameters=[TRANSLATION_HEADER]
     )
     def get(self, request, pk, *args, **kwargs):
-        """Bitta mashina"""
-        if not is_superadmin_or_admin(request):
-            return Response({
-                "Message": "Sizda bunday ruxsat yo'q",
-                "status": status.HTTP_403_FORBIDDEN
-            })
-        
-        car = Car.objects.filter(id=pk).first()
+        car = self.get_car_object(request, pk)
+        if car == "forbidden":
+            return Response(
+                {
+                    "Message": "Sizda bunday ruxsat yo'q",
+                    "status": status.HTTP_403_FORBIDDEN,
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
         if not car:
-            return Response({
-                "Message": "Bunday mashina topilmadi",
-                "status": status.HTTP_404_NOT_FOUND
-            })
-        
-        # MUHIM: context qo'shish
-        serializer = CarSerializer(car, context={'request': request})
-        return Response({
-            "car": serializer.data,
-            "status": status.HTTP_200_OK
-        })
+            return Response(
+                {
+                    "Message": "Bunday mashina topilmadi",
+                    "status": status.HTTP_404_NOT_FOUND,
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = CarSerializer(
+            car,
+            context={"request": request}
+        )
+        return Response(
+            {
+                "car": serializer.data,
+                "status": status.HTTP_200_OK,
+            },
+            status=status.HTTP_200_OK
+        )
 
     @swagger_auto_schema(
         request_body=CarSerializer,
@@ -819,60 +905,107 @@ class CarCRUDView(APIView):
         manual_parameters=[TRANSLATION_HEADER]
     )
     def patch(self, request, pk, *args, **kwargs):
-        """Mashinani yangilash"""
-        if not is_superadmin_or_admin(request):
-            return Response({
-                "Message": "Sizda bunday ruxsat yo'q",
-                "status": status.HTTP_403_FORBIDDEN
-            })
-        
-        car = Car.objects.filter(id=pk).first()
+        car = self.get_car_object(request, pk)
+        if car == "forbidden":
+            return Response(
+                {
+                    "Message": "Sizda bunday ruxsat yo'q",
+                    "status": status.HTTP_403_FORBIDDEN,
+                },
+              status=status.HTTP_403_FORBIDDEN
+            )
         if not car:
-            return Response({
-                "Message": "Bunday mashina topilmadi",
-                "status": status.HTTP_404_NOT_FOUND
-            })
-        
-        # MUHIM: context qo'shish
+            return Response(
+                {
+                    "Message": "Bunday mashina topilmadi",
+                    "status": status.HTTP_404_NOT_FOUND,
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+        data = request.data.copy()
+        car_image_logo = request.FILES.get("car_image_logo")
+        car_image_portfolio = request.FILES.get("car_image_portfolio")
+        tex_pasport = request.FILES.get("tex_pasport")
+        try:
+            if car_image_logo:
+                data["car_image_logo"] = upload_file_to_spaces(
+                    car_image_logo,
+                    folder="car_images"
+                )
+            if car_image_portfolio:
+                data["car_image_portfolio"] = upload_file_to_spaces(
+                    car_image_portfolio,
+                    folder="car_images"
+                )
+            if tex_pasport:
+                data["tex_pasport"] = upload_file_to_spaces(
+                    tex_pasport,
+                    folder="car_documents"
+                )
+        except Exception as e:
+            return Response(
+                {
+                    "message": "Fayl upload qilishda xato",
+                    "error": str(e),
+                    "status": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         serializer = CarSerializer(
-            car, 
-            data=request.data, 
+            car,
+            data=data,
             partial=True,
-            context={'request': request}
+            context={"request": request}
         )
         if serializer.is_valid():
-            serializer.save()
-            return Response({
-                "Message": "Mashina muvafaqiyatli o'zgartirildi",
-                "data": serializer.data,
-                "status": status.HTTP_200_OK
-            })
-        else:
-            return Response({
+            car = serializer.save()
+            return Response(
+                {
+                    "Message": "Mashina muvafaqiyatli o'zgartirildi",
+                    "data": CarSerializer(
+                        car,
+                        context={"request": request}
+                    ).data,
+                    "status": status.HTTP_200_OK,
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(
+            {
                 "Message": "Bizga topshirgan ma'lumotlaringiz yetarli emas",
                 "error": serializer.errors,
-                "status": status.HTTP_400_BAD_REQUEST
-            })
+                "status": status.HTTP_400_BAD_REQUEST,
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     @swagger_auto_schema(tags=["Car"])
     def delete(self, request, pk, *args, **kwargs):
-        """Mashinani o'chirish"""
-        if not is_superadmin_or_admin(request):
-            return Response({
-                "Message": "Sizda bunday ruxsat yo'q",
-                "status": status.HTTP_403_FORBIDDEN
-            })
-        car = Car.objects.filter(id=pk).first()
+        car = self.get_car_object(request, pk)
+        if car == "forbidden":
+            return Response(
+                {
+                    "Message": "Sizda bunday ruxsat yo'q",
+                    "status": status.HTTP_403_FORBIDDEN,
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
         if not car:
-            return Response({
-                "Message": "Bunday mashina topilmadi",
-                "status": status.HTTP_404_NOT_FOUND
-            })
+            return Response(
+                {
+                    "Message": "Bunday mashina topilmadi",
+                    "status": status.HTTP_404_NOT_FOUND,
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
         car.delete()
-        return Response({
-            "Message": "Mashina muvafaqiyatli o'chirildi",
-            "status": status.HTTP_200_OK
-        })
+        return Response(
+            {
+                "Message": "Mashina muvafaqiyatli o'chirildi",
+                "status": status.HTTP_200_OK,
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 
@@ -2492,33 +2625,21 @@ class CarImageAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [IsAuthenticated]
 
-    def get_user_company_id(self, user):
-        if getattr(user, "role", None) == "admin":
-            return getattr(user, "id", None)
-        if getattr(user, "role", None) == "manager":
-            company = getattr(user, "company", None)
-            if company:
-                return getattr(company, "id", None)
-            return getattr(user, "company_id", None)
-        return None
-
     @swagger_auto_schema(tags=["Car Image"])
     def get(self, request):
         user = request.user
         role = getattr(user, "role", None)
         images = CarImage.objects.select_related("car").all().order_by("-id")
-        if role == "admin":
-            images = images.filter(car__company_id=user.id)
-        elif role == "manager":
-            company_id = self.get_user_company_id(user)
-            if not company_id:
+        if role == "superadmin":
+            pass
+        elif role in ["admin", "manager"]:
+            company = get_user_company(user)
+            if not company:
                 return Response(
-                    {"detail": "Manager company topilmadi"},
+                    {"detail": "Company topilmadi"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            images = images.filter(car__company_id=company_id)
-        elif role == "superadmin":
-            pass
+            images = images.filter(car__company_id=company.id)
         else:
             return Response(
                 {"detail": "Ruxsat yo'q"},
@@ -2554,24 +2675,11 @@ class CarImageAPIView(APIView):
                 {"detail": "Car majburiy"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        if role == "admin":
-            if car.company_id != user.id:
-                return Response(
-                    {"detail": "Bu car sizning companyga tegishli emas"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        elif role == "manager":
-            company_id = self.get_user_company_id(user)
-            if not company_id:
-                return Response(
-                    {"detail": "Manager company topilmadi"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            if car.company_id != company_id:
-                return Response(
-                    {"detail": "Bu car sizning companyga tegishli emas"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+        if not user_can_access_car(user, car):
+            return Response(
+                {"detail": "Bu car sizning companyga tegishli emas"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         car_image = serializer.save()
         response_serializer = CarImageSerializer(
             car_image,
@@ -2593,6 +2701,11 @@ class CarImageByCarAPIView(APIView):
             return Response(
                 {"detail": "Car topilmadi"},
                 status=status.HTTP_404_NOT_FOUND
+            )
+        if not user_can_access_car(request.user, car):
+            return Response(
+                {"detail": "Bu car sizning companyga tegishli emas"},
+                status=status.HTTP_403_FORBIDDEN
             )
         images = CarImage.objects.filter(car=car).order_by("id")
         serializer = CarImageSerializer(
