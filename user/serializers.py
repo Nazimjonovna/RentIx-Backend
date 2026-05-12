@@ -84,6 +84,8 @@ class CompanyWorkDaySerializer(serializers.ModelSerializer):
 
 # Filial serializeri
 class FilialSerializer(AutoTranslateMixin, serializers.ModelSerializer):
+    workdays = serializers.SerializerMethodField()
+
     """
     Filial serializer with translations for name and address
     """
@@ -99,9 +101,21 @@ class FilialSerializer(AutoTranslateMixin, serializers.ModelSerializer):
             "address_en",     # en
             "company",
             "phone",
+            "workdays",
         )
-        read_only_fields = ['id', 'name_ru', 'name_en', 'address_ru', 'address_en']
+        read_only_fields = ['id', 'name_ru', 'name_en', 'address_ru', 'address_en', "workdays",]
         translatable_fields = ['name', 'address']
+        
+    def get_workdays(self, obj):
+        workdays = CompanyWorkDay.objects.filter(
+            company=obj.company
+        ).order_by("id")
+
+        return CompanyWorkDaySerializer(
+            workdays,
+            many=True,
+            context=self.context
+        ).data
 
 
 # Kompaniya serializeri
@@ -159,10 +173,6 @@ class OrderSerializer(serializers.ModelSerializer):
         return obj.calculate_cost()
 
     def validate(self, attrs):
-        """
-        Company ishlash vaqtini tekshiradi
-        Model clean() ni ishlatamiz
-        """
         request = self.context.get("request")
         user = request.user if request else None
         order = Order(user=user, **attrs)
@@ -175,9 +185,6 @@ class OrderSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        """
-        User ni requestdan olamiz
-        """
         user = self.context["request"].user
         order = Order(user=user, **validated_data)
         order.save()  # save() ichida full_clean + cost calculation ishlaydi
@@ -232,34 +239,87 @@ class CarModelSerializer(serializers.ModelSerializer):
 
 
 class CarSerializer(serializers.ModelSerializer):
-    # Fayllar uchun URL'lar
     car_image_logo_url = serializers.SerializerMethodField()
     car_image_portfolio_url = serializers.SerializerMethodField()
     tex_pasport_url = serializers.SerializerMethodField()
+    car_images = serializers.SerializerMethodField()
 
     class Meta:
         model = Car
         fields = "__all__"
-        read_only_fields = ['id', 'company', 'created', 'updated', 'car_name_ru', 'car_name_en', 'commit_ru', 'commit_en']
+        read_only_fields = [
+            "id",
+            "company",
+            "created",
+            "updated",
+            "car_name_ru",
+            "car_name_en",
+            "commit_ru",
+            "commit_en",
+            "car_image_logo_url",
+            "car_image_portfolio_url",
+            "tex_pasport_url",
+            "car_images",
+        ]
 
-    # car_image_logo URL'sini olish uchun metod
+    def get_field_names(self, declared_fields, info):
+        fields = super().get_field_names(declared_fields, info)
+        extra_fields = [
+            "car_image_logo_url",
+            "car_image_portfolio_url",
+            "tex_pasport_url",
+            "car_images",
+        ]
+        for field in extra_fields:
+            if field not in fields:
+                fields.append(field)
+        return fields
+
+    def build_absolute_file_url(self, file_field):
+        if not file_field:
+            return None
+        request = self.context.get("request")
+        try:
+            url = file_field.url
+        except Exception:
+            url = str(file_field)
+        if not url:
+            return None
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        if request:
+            try:
+                return request.build_absolute_uri(url)
+            except Exception:
+                return url
+        return url
+
     def get_car_image_logo_url(self, obj):
-        if obj.car_image_logo:
-            return obj.car_image_logo  # URL'ni to'g'ridan-to'g'ri qaytaramiz
-        return None
+        return self.build_absolute_file_url(
+            getattr(obj, "car_image_logo", None)
+        )
 
-    # car_image_portfolio URL'sini olish uchun metod
     def get_car_image_portfolio_url(self, obj):
-        if obj.car_image_portfolio:
-            return obj.car_image_portfolio  # URL'ni to'g'ridan-to'g'ri qaytaramiz
-        return None
+        return self.build_absolute_file_url(
+            getattr(obj, "car_image_portfolio", None)
+        )
 
-    # tex_pasport URL'sini olish uchun metod
     def get_tex_pasport_url(self, obj):
-        if obj.tex_pasport:
-            return obj.tex_pasport  # URL'ni to'g'ridan-to'g'ri qaytaramiz
-        return None
+        return self.build_absolute_file_url(
+            getattr(obj, "tex_pasport", None)
+        )
 
+    def get_car_images(self, obj):
+        try:
+            images = CarImage.objects.filter(car=obj).order_by("id")
+        except Exception:
+            return []
+
+        return CarImageSerializer(
+            images,
+            many=True,
+            context=self.context
+        ).data
 
 class AvailableCarTimeFilterSerializer(serializers.Serializer):
     company = serializers.IntegerField(required=False)
@@ -354,9 +414,6 @@ class ManagerSerializer(serializers.ModelSerializer):
     
 
 class ManagerCRUDSerializer(serializers.ModelSerializer):
-    """
-    Manager CRUD operations
-    """
     class Meta:
         model = Manager
         fields = "__all__"
@@ -483,9 +540,6 @@ class UserTokenRequestSerializer(serializers.Serializer):
 
 
 class CarRateSerializer(AutoTranslateMixin, serializers.ModelSerializer):
-    """
-    Car rate serializer with translations for comments
-    """
     class Meta:
         model = CarRate
         fields = (
@@ -568,10 +622,6 @@ class CompanySubscriptionSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        """
-        Create metodi narx va end_date ni avtomatik to‘ldiradi
-        (model save() ichida ham mavjud, lekin serializerdan qo‘llash xavfsiz).
-        """
         plan = validated_data.get('plan')
         if 'price' not in validated_data:
             validated_data['price'] = PLAN_PRICES.get(plan, 0)
@@ -580,9 +630,6 @@ class CompanySubscriptionSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        """
-        Update qilganda plan o'zgarganda narx ham yangilanadi.
-        """
         plan = validated_data.get('plan', instance.plan)
         if plan != instance.plan:
             instance.price = PLAN_PRICES.get(plan, instance.price)
@@ -604,11 +651,6 @@ class CompanySubscriptionSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, data):
-        """
-        Umumiy validatsiya:
-        - Plan narxi to'g'ri bo'lishi kerak (agar price berilmagan bo'lsa avtomatik PLAN_PRICES dan olinadi)
-        - End date boshlanish sanasidan keyin bo'lishi kerak
-        """
         plan = data.get("plan")
         price = data.get("price")
         start_date = data.get("start_date", timezone.now().date())
@@ -622,18 +664,12 @@ class CompanySubscriptionSerializer(serializers.ModelSerializer):
         return data
 
     def validate_price(self, price):
-        """
-        Narx minimal qiymatdan past bo'lmasligi kerak (agar siz xohlasangiz)
-        """
         if price is not None and price <= 0:
             raise serializers.ValidationError("Price 0 dan katta bo'lishi kerak.")
         return price
 
 
 class BotNotificationSerializer(AutoTranslateMixin, serializers.ModelSerializer):
-    """
-    Bot notification serializer with translations
-    """
     class Meta:
         model = BotNotification
         fields = (
@@ -787,10 +823,31 @@ class CheckInOutSerializer(serializers.ModelSerializer):
 
 
 class CarImageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
     class Meta:
         model = CarImage
-        fields = '__all__'
-        read_only_fields = ('id',)
+        fields = [
+            "id",
+            "car",
+            "image",
+            "image_url",
+        ]
+        read_only_fields = ["id", "image_url"]
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        image = getattr(obj, "image", None)
+        if not image:
+            return None
+        try:
+            url = image.url
+        except Exception:
+            return None
+
+        if request:
+            return request.build_absolute_uri(url)
+        return url
 
 
 class ViloyatlarSerializer(serializers.ModelSerializer):
@@ -820,3 +877,402 @@ class UploadURLResponseSerializer(serializers.Serializer):
     
 class UploadURLRequestSerializer(serializers.Serializer):
     file_name = serializers.CharField()
+    
+    
+class StaffOrderListItemSerializer(serializers.ModelSerializer):
+    car = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    order_id = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField()
+    start_date = serializers.SerializerMethodField()
+    end_date = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_id",
+            "status",
+            "status_display",
+            "car",
+            "start_date",
+            "end_date",
+            "total_price",
+        ]
+
+    def get_order_id(self, obj):
+        return (
+            getattr(obj, "order_id", None)
+            or getattr(obj, "order_number", None)
+            or getattr(obj, "code", None)
+            or f"#{obj.id}"
+        )
+
+    def get_status_display(self, obj):
+        if hasattr(obj, "get_status_display"):
+            return obj.get_status_display()
+        return getattr(obj, "status", None)
+
+    def get_start_date(self, obj):
+        value = (
+            getattr(obj, "start_date", None)
+            or getattr(obj, "start_time", None)
+            or getattr(obj, "from_date", None)
+            or getattr(obj, "take_date", None)
+        )
+        return self.format_datetime(value)
+
+    def get_end_date(self, obj):
+        value = (
+            getattr(obj, "end_date", None)
+            or getattr(obj, "end_time", None)
+            or getattr(obj, "to_date", None)
+            or getattr(obj, "return_date", None)
+        )
+        return self.format_datetime(value)
+
+    def get_total_price(self, obj):
+        return (
+            getattr(obj, "total_price", None)
+            or getattr(obj, "total_amount", None)
+            or getattr(obj, "price", None)
+            or getattr(obj, "amount", None)
+        )
+
+    def get_car(self, obj):
+        car = getattr(obj, "car", None)
+
+        if not car:
+            return None
+
+        return {
+            "id": car.id,
+            "name": self.get_car_name(car),
+            "plate_number": (
+                getattr(car, "plate_number", None)
+                or getattr(car, "number", None)
+                or getattr(car, "car_number", None)
+                or getattr(car, "state_number", None)
+            ),
+            "image": self.get_car_image(car),
+        }
+
+    def get_car_name(self, car):
+        brand = getattr(car, "brand", None)
+        model = getattr(car, "model", None)
+
+        brand_name = getattr(brand, "name", None) if brand else None
+        model_name = getattr(model, "name", None) if model else None
+
+        if brand_name or model_name:
+            return f"{brand_name or ''} {model_name or ''}".strip()
+
+        return str(car)
+
+    def get_car_image(self, car):
+        request = self.context.get("request")
+
+        try:
+            car_image = CarImage.objects.filter(car=car).first()
+            if car_image and car_image.image:
+                url = car_image.image.url
+                return request.build_absolute_uri(url) if request else url
+        except Exception:
+            pass
+
+        return None
+
+    def format_datetime(self, value):
+        if not value:
+            return None
+
+        try:
+            return value.strftime("%d.%m.%Y %H:%M")
+        except Exception:
+            return str(value)
+
+
+class StaffOrderDetailSerializer(serializers.ModelSerializer):
+    order_id = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+
+    customer = serializers.SerializerMethodField()
+    car = serializers.SerializerMethodField()
+    manager = serializers.SerializerMethodField()
+    company = serializers.SerializerMethodField()
+
+    order_details = serializers.SerializerMethodField()
+    payment = serializers.SerializerMethodField()
+    previous_orders = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_id",
+            "status",
+            "status_display",
+            "customer",
+            "car",
+            "manager",
+            "company",
+            "order_details",
+            "payment",
+            "previous_orders",
+        ]
+
+    def get_order_id(self, obj):
+        return (
+            getattr(obj, "order_id", None)
+            or getattr(obj, "order_number", None)
+            or getattr(obj, "code", None)
+            or f"#{obj.id}"
+        )
+
+    def get_status_display(self, obj):
+        if hasattr(obj, "get_status_display"):
+            return obj.get_status_display()
+        return getattr(obj, "status", None)
+
+    def get_customer(self, obj):
+        user = getattr(obj, "user", None)
+
+        if not user:
+            return None
+
+        return {
+            "id": user.id,
+            "full_name": (
+                getattr(user, "full_name", None)
+                or getattr(user, "username", None)
+                or getattr(user, "phone", None)
+            ),
+            "phone": getattr(user, "phone", None),
+            "second_phone": (
+                getattr(user, "second_phone", None)
+                or getattr(user, "extra_phone", None)
+                or getattr(user, "additional_phone", None)
+            ),
+            "passport": (
+                getattr(user, "passport", None)
+                or getattr(user, "passport_number", None)
+            ),
+            "birth_date": self.format_date(
+                getattr(user, "birth_date", None)
+                or getattr(user, "date_of_birth", None)
+            ),
+            "address": getattr(user, "address", None),
+            "role": getattr(user, "role", None),
+            "order_count": getattr(user, "order_count", 0),
+        }
+
+    def get_car(self, obj):
+        car = getattr(obj, "car", None)
+
+        if not car:
+            return None
+
+        brand = getattr(car, "brand", None)
+        model = getattr(car, "model", None)
+
+        brand_name = getattr(brand, "name", None) if brand else None
+        model_name = getattr(model, "name", None) if model else None
+
+        return {
+            "id": car.id,
+            "name": f"{brand_name or ''} {model_name or ''}".strip() or str(car),
+            "brand": brand_name,
+            "model": model_name,
+            "plate_number": (
+                getattr(car, "plate_number", None)
+                or getattr(car, "number", None)
+                or getattr(car, "car_number", None)
+                or getattr(car, "state_number", None)
+            ),
+            "color": getattr(car, "color", None),
+            "year": getattr(car, "year", None),
+            "transmission": getattr(car, "transmission", None),
+            "fuel_type": getattr(car, "fuel_type", None),
+            "status": getattr(car, "status", None),
+            "deposit": getattr(car, "deposit", None),
+            "daily_price": (
+                getattr(car, "daily_price", None)
+                or getattr(car, "price_per_day", None)
+            ),
+            "hourly_price": (
+                getattr(car, "hourly_price", None)
+                or getattr(car, "price_per_hour", None)
+            ),
+            "image": self.get_car_image(car),
+        }
+
+    def get_manager(self, obj):
+        manager = getattr(obj, "manager", None)
+
+        if not manager:
+            return None
+
+        manager_user = getattr(manager, "user", None)
+
+        return {
+            "id": manager.id,
+            "full_name": (
+                getattr(manager_user, "full_name", None)
+                or getattr(manager_user, "username", None)
+                or str(manager)
+            ) if manager_user else str(manager),
+            "phone": getattr(manager_user, "phone", None) if manager_user else None,
+        }
+
+    def get_company(self, obj):
+        company = self.get_order_company(obj)
+
+        if not company:
+            return None
+
+        return {
+            "id": company.id,
+            "name": getattr(company, "name", None),
+        }
+
+    def get_order_details(self, obj):
+        return {
+            "created_at": self.format_datetime(getattr(obj, "created_at", None)),
+            "start_date": self.format_datetime(
+                getattr(obj, "start_date", None)
+                or getattr(obj, "start_time", None)
+                or getattr(obj, "from_date", None)
+                or getattr(obj, "take_date", None)
+            ),
+            "end_date": self.format_datetime(
+                getattr(obj, "end_date", None)
+                or getattr(obj, "end_time", None)
+                or getattr(obj, "to_date", None)
+                or getattr(obj, "return_date", None)
+            ),
+            "pickup_filial": self.get_filial_name(
+                getattr(obj, "pickup_filial", None)
+                or getattr(obj, "from_filial", None)
+                or getattr(obj, "filial", None)
+            ),
+            "return_filial": self.get_filial_name(
+                getattr(obj, "return_filial", None)
+                or getattr(obj, "to_filial", None)
+                or getattr(obj, "filial", None)
+            ),
+            "pickup_address": (
+                getattr(obj, "pickup_address", None)
+                or getattr(obj, "from_address", None)
+            ),
+            "return_address": (
+                getattr(obj, "return_address", None)
+                or getattr(obj, "to_address", None)
+            ),
+            "comment": getattr(obj, "comment", None),
+        }
+
+    def get_payment(self, obj):
+        return {
+            "payment_type": (
+                getattr(obj, "payment_type", None)
+                or getattr(obj, "payment_method", None)
+            ),
+            "payment_status": getattr(obj, "payment_status", None),
+            "daily_price": (
+                getattr(obj, "daily_price", None)
+                or getattr(obj, "price_per_day", None)
+            ),
+            "hourly_price": (
+                getattr(obj, "hourly_price", None)
+                or getattr(obj, "price_per_hour", None)
+            ),
+            "rent_price": (
+                getattr(obj, "rent_price", None)
+                or getattr(obj, "car_price", None)
+            ),
+            "insurance_price": getattr(obj, "insurance_price", None),
+            "delivery_price": getattr(obj, "delivery_price", None),
+            "discount_price": (
+                getattr(obj, "discount_price", None)
+                or getattr(obj, "discount_amount", None)
+            ),
+            "deposit": getattr(obj, "deposit", None),
+            "total_price": (
+                getattr(obj, "total_price", None)
+                or getattr(obj, "total_amount", None)
+                or getattr(obj, "price", None)
+                or getattr(obj, "amount", None)
+            ),
+        }
+
+    def get_previous_orders(self, obj):
+        user = getattr(obj, "user", None)
+
+        if not user:
+            return []
+
+        previous_orders = (
+            Order.objects
+            .filter(user=user)
+            .exclude(id=obj.id)
+            .order_by("-id")[:10]
+        )
+
+        return StaffOrderListItemSerializer(
+            previous_orders,
+            many=True,
+            context=self.context
+        ).data
+
+    def get_order_company(self, obj):
+        company = getattr(obj, "company", None)
+
+        if company:
+            return company
+
+        car = getattr(obj, "car", None)
+        if car:
+            return getattr(car, "company", None)
+
+        manager = getattr(obj, "manager", None)
+        if manager:
+            return getattr(manager, "company", None)
+
+        return None
+
+    def get_filial_name(self, filial):
+        if not filial:
+            return None
+
+        return getattr(filial, "name", None) or str(filial)
+
+    def get_car_image(self, car):
+        request = self.context.get("request")
+
+        try:
+            car_image = CarImage.objects.filter(car=car).first()
+            if car_image and car_image.image:
+                url = car_image.image.url
+                return request.build_absolute_uri(url) if request else url
+        except Exception:
+            pass
+
+        return None
+
+    def format_datetime(self, value):
+        if not value:
+            return None
+
+        try:
+            return value.strftime("%d.%m.%Y %H:%M")
+        except Exception:
+            return str(value)
+
+    def format_date(self, value):
+        if not value:
+            return None
+
+        try:
+            return value.strftime("%d.%m.%Y")
+        except Exception:
+            return str(value)

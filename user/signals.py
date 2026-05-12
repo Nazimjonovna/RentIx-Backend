@@ -1,141 +1,172 @@
+import logging
 import requests
-from django.conf import settings
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from .models import BotNotification, ChekInOut, User, Order
-from django.db.models.signals import pre_save
-from django.dispatch import receiver
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from googletrans import Translator
+
+from django.conf import settings
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
+
+from googletrans import Translator
+
 from .models import (
-    Company, Filial, Car, Discount, 
-    Notification, BotNotification, CarRate, CarModel, CarBrand,
+    User,
+    Order,
+    ChekInOut,
+    Company,
+    Filial,
+    Car,
+    Discount,
+    Notification,
+    BotNotification,
+    CarRate,
+    CarModel,
+    CarBrand,
 )
 
-# Google Translator instance
+from .services import create_default_filial_and_workdays
+
+
+logger = logging.getLogger(__name__)
 translator = Translator()
 
-
-# TELEGRAM_API_URL = f"https://t.me/RentiixBot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
 
+
+def get_manager_name(manager):
+    if not manager:
+        return None
+    manager_user = getattr(manager, "user", None)
+    if manager_user:
+        return (
+            getattr(manager_user, "full_name", None)
+            or getattr(manager_user, "username", None)
+            or getattr(manager_user, "phone", None)
+            or str(manager_user.id)
+        )
+    return str(manager)
+
+
+def send_ws_notification_to_user(notification):
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        logger.warning("Channel layer topilmadi. Redis/Channels settingsni tekshiring.")
+        return False
+    user_id = notification.user_id
+    manager_name = get_manager_name(getattr(notification, "manager", None))
+    created_at = None
+    if getattr(notification, "created_at", None):
+        created_at = notification.created_at.strftime("%Y-%m-%d %H:%M:%S")
+    async_to_sync(channel_layer.group_send)(
+        f"notify_{user_id}",
+        {
+            "type": "notify",
+            "id": notification.id,
+            "title": notification.title,
+            "message": notification.message,
+            "manager_name": manager_name,
+            "created_at": created_at,
+            "source": "notification",
+        }
+    )
+    return True
+
+
+def send_telegram_message(user, text):
+    telegram_id = getattr(user, "telegram_id", None)
+    if not telegram_id:
+        return False
+    payload = {
+        "chat_id": telegram_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    }
+    try:
+        response = requests.post(
+            TELEGRAM_API_URL,
+            json=payload,
+            timeout=5
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        logger.error(f"Telegram xabar yuborishda xato. user_id={user.id}, error={e}")
+        return False
+
+
+def translate_text(text, dest_lang):
+    if not text or not str(text).strip():
+        return text
+    try:
+        return translator.translate(
+            text,
+            src="auto",
+            dest=dest_lang
+        ).text
+    except Exception as e:
+        logger.error(f"Tarjima xatosi: {e}")
+        return text
 
 @receiver(post_save, sender=Notification)
 def send_notification_ws(sender, instance, created, **kwargs):
     if not created:
         return
-
-    channel_layer = get_channel_layer()
-    group_name = f"notify_{instance.user.id}"
-
-    async_to_sync(channel_layer.group_send)(
-        group_name,
-        {
-            "type": "notify",
-            "title": instance.title,
-            "message": instance.message,
-            "manager_name": getattr(instance, "manager_name", ""),
-            "created_at": instance.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-    
-
-@receiver(post_save, sender=Order)
-def update_user_order_count_and_role(sender, instance, created, **kwargs):
-    """
-    Har safar yangi Order yaratildi:
-    - user.order_count +1 bo'ladi
-    - agar order_count >= 2 bo'lsa, role 'regular customer' ga o'zgaradi
-    """
-    if created:
-        user = instance.user
-        # order_count +1 (oldingi qiymat bo'lmasa 0)
-        user.order_count = (user.order_count or 0) + 1
-        # Agar order_count 2 yoki undan ko'p bo'lsa role o'zgartirish
-        if user.order_count >= 2:
-            user.role = "regular customer"
-        user.save()
+    try:
+        send_ws_notification_to_user(instance)
+    except Exception as e:
+        logger.error(f"WebSocket notification yuborishda xato. notification_id={instance.id}, error={e}")
 
 
 @receiver(post_save, sender=BotNotification)
-def send_notification_to_users(sender, instance, created, **kwargs):
+def send_bot_notification_to_users(sender, instance, created, **kwargs):
     if not created:
         return
-    users = User.objects.all()
-    channel_layer = get_channel_layer()
     text = f"*{instance.title}*\n\n{instance.message}"
+    users = User.objects.all()
     for user in users:
         try:
-            # DB ga notification yaratamiz
-            notification = Notification.objects.create(
+            Notification.objects.create(
                 user=user,
-                manager=instance.manager,  # BotNotification’da manager bor deb hisoblayapman
+                manager=instance.manager,
                 title=instance.title,
                 message=instance.message,
             )
-
-            # WebSocket orqali real-time yuboramiz
-            async_to_sync(channel_layer.group_send)(
-                f"notify_{user.id}",
-                {
-                    "type": "notify",
-                    "title": notification.title,
-                    "message": notification.message,
-                    "manager_name": notification.manager.user.full_name,
-                    "created_at": str(notification.created_at),
-                }
-            )
-
-            # Telegramga yuboramiz (agar userda telegram_id bo‘lsa)
-            if user.telegram_id:
-                payload = {
-                    "chat_id": user.telegram_id,
-                    "text": text,
-                    "parse_mode": "Markdown"
-                }
-                requests.post(TELEGRAM_API_URL, json=payload, timeout=5)
-
+            send_telegram_message(user, text)
         except Exception as e:
-            print(f"Error for user {user.id}: {e}")
+            logger.error(f"BotNotification yuborishda xato. user_id={user.id}, error={e}")
+
+
+@receiver(post_save, sender=Order)
+def update_user_order_count_and_role(sender, instance, created, **kwargs):
+    if not created:
+        return
+    user = instance.user
+    user.order_count = (user.order_count or 0) + 1
+    if user.order_count >= 2:
+        user.role = "regular customer"
+    user.save(update_fields=["order_count", "role"])
+    
+    
+@receiver(post_save, sender=Order)
+def send_order_created_notification(sender, instance, created, **kwargs):
+    if not created:
+        return
+    Notification.objects.create(
+        user=instance.user,
+        manager=getattr(instance, "manager", None),
+        title="Order yaratildi",
+        message="Sizning buyurtmangiz muvaffaqiyatli yaratildi."
+    )
 
 
 @receiver(post_save, sender=ChekInOut)
 def set_car_unavailable(sender, instance, created, **kwargs):
-    if created:
-        car = instance.car
-        car.status = "unavailable"
-        car.save(update_fields=["status"])
-
-
-def finish_checkout(request, pk):
-    check = ChekInOut.objects.get(pk=pk)
-
-    # checkout images yuklandi deb hisoblaymiz
-    if check.checkout_images.exists():
-        car = check.car
-        car.status = "available"
-        car.save()
-
-    return requests.Response({"status": "completed"})
-
-#Til bo'yicha konfiguratsiya
-
-
-def translate_text(text, dest_lang):
-    if not text or not text.strip():
-        return text
-    try:
-        return translator.translate(
-            text,
-            src='auto',   
-            dest=dest_lang
-        ).text
-    except Exception as e:
-        print("Tarjima xatosi:", e)
-        
-        return text
+    if not created:
+        return
+    car = instance.car
+    car.status = "unavailable"
+    car.save(update_fields=["status"])
 
 
 @receiver(pre_save, sender=CarBrand)
@@ -167,88 +198,113 @@ def car_auto_translate(sender, instance, **kwargs):
         if not instance.commit_en:
             instance.commit_en = translate_text(instance.commit, "en")
 
-# ============== COMPANY MODEL TRANSLATION ==============
+
 @receiver(pre_save, sender=Company)
 def auto_translate_company(sender, instance, **kwargs):
-    """Company modelini avtomatik tarjima qiladi"""
-    if instance.name and not instance.name_ru:
-        instance.name_ru = translate_text(instance.name, 'ru')
-        instance.name_en = translate_text(instance.name, 'en')
+    if instance.name:
+        if not instance.name_ru:
+            instance.name_ru = translate_text(instance.name, "ru")
+
+        if not instance.name_en:
+            instance.name_en = translate_text(instance.name, "en")
 
 
-# ============== FILIAL MODEL TRANSLATION ==============
 @receiver(pre_save, sender=Filial)
 def auto_translate_filial(sender, instance, **kwargs):
-    """Filial modelini avtomatik tarjima qiladi"""
-    if instance.name and not instance.name_ru:
-        instance.name_ru = translate_text(instance.name, 'ru')
-        instance.name_en = translate_text(instance.name, 'en')
-    
-    if instance.address and not instance.address_ru:
-        instance.address_ru = translate_text(instance.address, 'ru')
-        instance.address_en = translate_text(instance.address, 'en')
+    if instance.name:
+        if not instance.name_ru:
+            instance.name_ru = translate_text(instance.name, "ru")
+
+        if not instance.name_en:
+            instance.name_en = translate_text(instance.name, "en")
+
+    if instance.address:
+        if not instance.address_ru:
+            instance.address_ru = translate_text(instance.address, "ru")
+
+        if not instance.address_en:
+            instance.address_en = translate_text(instance.address, "en")
 
 
-# ============== DISCOUNT MODEL TRANSLATION ==============
 @receiver(pre_save, sender=Discount)
 def auto_translate_discount(sender, instance, **kwargs):
-    """Discount modelida title yoki description bo'lsa tarjima qiladi"""
-    if hasattr(instance, 'title') and instance.title and not instance.title_ru:
-        instance.title_ru = translate_text(instance.title, 'ru')
-        instance.title_en = translate_text(instance.title, 'en')
-    
-    if hasattr(instance, 'description') and instance.description and not instance.description_ru:
-        instance.description_ru = translate_text(instance.description, 'ru')
-        instance.description_en = translate_text(instance.description, 'en')
+    if hasattr(instance, "title") and instance.title:
+        if not instance.title_ru:
+            instance.title_ru = translate_text(instance.title, "ru")
+
+        if not instance.title_en:
+            instance.title_en = translate_text(instance.title, "en")
+
+    if hasattr(instance, "description") and instance.description:
+        if not instance.description_ru:
+            instance.description_ru = translate_text(instance.description, "ru")
+
+        if not instance.description_en:
+            instance.description_en = translate_text(instance.description, "en")
 
 
-# ============== NOTIFICATION MODEL TRANSLATION ==============
 @receiver(pre_save, sender=Notification)
 def auto_translate_notification(sender, instance, **kwargs):
-    """Notification modelini avtomatik tarjima qiladi"""
-    if instance.title and not instance.title_ru:
-        instance.title_ru = translate_text(instance.title, 'ru')
-        instance.title_en = translate_text(instance.title, 'en')
-    
-    if instance.message and not instance.message_ru:
-        instance.message_ru = translate_text(instance.message, 'ru')
-        instance.message_en = translate_text(instance.message, 'en')
+    if instance.title:
+        if not instance.title_ru:
+            instance.title_ru = translate_text(instance.title, "ru")
+
+        if not instance.title_en:
+            instance.title_en = translate_text(instance.title, "en")
+
+    if instance.message:
+        if not instance.message_ru:
+            instance.message_ru = translate_text(instance.message, "ru")
+
+        if not instance.message_en:
+            instance.message_en = translate_text(instance.message, "en")
 
 
-# ============== BOT NOTIFICATION MODEL TRANSLATION ==============
 @receiver(pre_save, sender=BotNotification)
 def auto_translate_bot_notification(sender, instance, **kwargs):
-    """BotNotification modelini avtomatik tarjima qiladi"""
-    if instance.title and not instance.title_ru:
-        instance.title_ru = translate_text(instance.title, 'ru')
-        instance.title_en = translate_text(instance.title, 'en')
-    
-    if instance.message and not instance.message_ru:
-        instance.message_ru = translate_text(instance.message, 'ru')
-        instance.message_en = translate_text(instance.message, 'en')
+    if instance.title:
+        if not instance.title_ru:
+            instance.title_ru = translate_text(instance.title, "ru")
+
+        if not instance.title_en:
+            instance.title_en = translate_text(instance.title, "en")
+
+    if instance.message:
+        if not instance.message_ru:
+            instance.message_ru = translate_text(instance.message, "ru")
+
+        if not instance.message_en:
+            instance.message_en = translate_text(instance.message, "en")
 
 
-# ============== CAR RATE (Comment) MODEL TRANSLATION ==============
 @receiver(pre_save, sender=CarRate)
 def auto_translate_car_rate(sender, instance, **kwargs):
-    """CarRate modelidagi comment va company_reply ni tarjima qiladi"""
-    if instance.comment and not instance.comment_ru:
-        instance.comment_ru = translate_text(instance.comment, 'ru')
-        instance.comment_en = translate_text(instance.comment, 'en')
-    
-    if instance.company_reply and not instance.company_reply_ru:
-        instance.company_reply_ru = translate_text(instance.company_reply, 'ru')
-        instance.company_reply_en = translate_text(instance.company_reply, 'en')
+    if instance.comment:
+        if not instance.comment_ru:
+            instance.comment_ru = translate_text(instance.comment, "ru")
 
+        if not instance.comment_en:
+            instance.comment_en = translate_text(instance.comment, "en")
 
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+    if instance.company_reply:
+        if not instance.company_reply_ru:
+            instance.company_reply_ru = translate_text(instance.company_reply, "ru")
 
-from .models import Company
-from .services import create_default_filial_and_workdays
+        if not instance.company_reply_en:
+            instance.company_reply_en = translate_text(instance.company_reply, "en")
+
 
 
 @receiver(post_save, sender=Company)
 def create_company_default_data(sender, instance, created, **kwargs):
-    if created:
+    """
+    Company yaratilganda default filial va workdays yaratadi.
+    """
+    if not created:
+        return
+
+    try:
         create_default_filial_and_workdays(instance)
+
+    except Exception as e:
+        logger.error(f"Company default data yaratishda xato. company_id={instance.id}, error={e}")

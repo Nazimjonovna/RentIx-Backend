@@ -52,9 +52,10 @@ from .serializers import (
     OrderStatusSerializer,BlockUserSerializer,DiscountSerializer,
     CheckInOutSerializer, ImagesCheckOutSerializer, ImagesCheckInSerializer,
     FilialSerializer, ViloyatlarSerializer,CarModelPortfolioSerializer,
-    UploadURLResponseSerializer,UploadURLRequestSerializer, CarBrandSerializer, CarModelSerializer
+    UploadURLResponseSerializer,UploadURLRequestSerializer, CarBrandSerializer, CarModelSerializer, StaffOrderDetailSerializer
 )
 from .utils.logger import logged
+from django.core.exceptions import FieldError
 from drf_yasg import openapi
 from user.exceptions import MethodNotFound, PermissionDenied, PerformTransactionDoesNotExist
 from user.methods.check_transaction import CheckTransaction
@@ -970,9 +971,6 @@ class AvailableCarModelFilterView(APIView):
 
 
 class CarCostFilterAPIView(APIView):
-    """
-    Mashinalarni faqat cost_day_tash bo‘yicha filter qiladi
-    """
     def get(self, request):
         serializer = AvailableCarCostFilterSerializer(
             data=request.query_params
@@ -2310,37 +2308,52 @@ class FilialView(APIView):
     )
     def get(self, request):
         """
-        Faqat token egasiga tegishli filiallar
+        Faqat token egasiga tegishli filiallar.
+        Response ichida company workdays ham qaytadi.
         """
         role = get_auth_role(request)
+
         if role == "superadmin":
-            filials = Filial.objects.all()
+            filials = Filial.objects.select_related("company").all()
+
         elif role == "admin":
             company = get_auth_company(request)
+
             if not company:
                 return Response(
                     {"detail": "Company topilmadi"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            filials = Filial.objects.filter(company=company)
+
+            filials = Filial.objects.select_related("company").filter(
+                company=company
+            )
+
         elif role == "manager":
             manager = get_auth_manager(request)
+
             if not manager:
                 return Response(
                     {"detail": "Manager topilmadi"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            filials = Filial.objects.filter(company=manager.company)
+
+            filials = Filial.objects.select_related("company").filter(
+                company=manager.company
+            )
+
         else:
             return Response(
                 {"detail": "Ruxsat yo'q"},
                 status=status.HTTP_403_FORBIDDEN
             )
+
         serializer = FilialSerializer(
             filials,
             many=True,
-            context={'request': request}
+            context={"request": request}
         )
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
@@ -2350,30 +2363,43 @@ class FilialView(APIView):
     )
     def post(self, request):
         """
-        Yangi filial yaratish
+        Yangi filial yaratish.
+        Response ichida workdays: [] ham qaytadi.
         """
         role = get_auth_role(request)
+
         if role not in ["admin", "superadmin"]:
             return Response(
                 {"detail": "Ruxsat yo'q"},
                 status=status.HTTP_403_FORBIDDEN
             )
+
         data = request.data.copy()
+
         if role == "admin":
             company = get_auth_company(request)
+
             if not company:
                 return Response(
                     {"detail": "Company topilmadi"},
                     status=status.HTTP_404_NOT_FOUND
                 )
+
             data["company"] = company.id
+
         serializer = FilialSerializer(
             data=data,
-            context={'request': request}
+            context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        filial = serializer.save()
+
+        response_serializer = FilialSerializer(
+            filial,
+            context={"request": request}
+        )
+
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class FilialDetailView(APIView):
@@ -2383,24 +2409,33 @@ class FilialDetailView(APIView):
     def get_object(self, request, pk):
         role = get_auth_role(request)
 
+        base_qs = Filial.objects.select_related("company")
+
         if role == "superadmin":
-            return Filial.objects.filter(id=pk).first()
+            return base_qs.filter(id=pk).first()
+
         if role == "admin":
             company = get_auth_company(request)
+
             if not company:
                 return None
-            return Filial.objects.filter(
+
+            return base_qs.filter(
                 id=pk,
                 company=company
             ).first()
+
         if role == "manager":
             manager = get_auth_manager(request)
+
             if not manager:
                 return None
-            return Filial.objects.filter(
+
+            return base_qs.filter(
                 id=pk,
                 company=manager.company
             ).first()
+
         return None
 
     @swagger_auto_schema(
@@ -2413,13 +2448,15 @@ class FilialDetailView(APIView):
         if not filial:
             return Response(
                 {"detail": "Filial topilmadi yoki sizga ruxsat yo'q"},
-                status=404
+                status=status.HTTP_404_NOT_FOUND
             )
+
         serializer = FilialSerializer(
             filial,
             context={"request": request}
         )
-        return Response(serializer.data, status=200)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         request_body=FilialSerializer,
@@ -2432,8 +2469,9 @@ class FilialDetailView(APIView):
         if not filial:
             return Response(
                 {"detail": "Filial topilmadi yoki sizga ruxsat yo'q"},
-                status=404
+                status=status.HTTP_404_NOT_FOUND
             )
+
         serializer = FilialSerializer(
             filial,
             data=request.data,
@@ -2441,16 +2479,51 @@ class FilialDetailView(APIView):
             context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=200)
+        filial = serializer.save()
+
+        response_serializer = FilialSerializer(
+            filial,
+            context={"request": request}
+        )
+
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 class CarImageAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [IsAuthenticated]
 
+    def get_user_company_id(self, user):
+        if getattr(user, "role", None) == "admin":
+            return getattr(user, "id", None)
+        if getattr(user, "role", None) == "manager":
+            company = getattr(user, "company", None)
+            if company:
+                return getattr(company, "id", None)
+            return getattr(user, "company_id", None)
+        return None
+
     @swagger_auto_schema(tags=["Car Image"])
     def get(self, request):
-        images = CarImage.objects.select_related("car").all()
+        user = request.user
+        role = getattr(user, "role", None)
+        images = CarImage.objects.select_related("car").all().order_by("-id")
+        if role == "admin":
+            images = images.filter(car__company_id=user.id)
+        elif role == "manager":
+            company_id = self.get_user_company_id(user)
+            if not company_id:
+                return Response(
+                    {"detail": "Manager company topilmadi"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            images = images.filter(car__company_id=company_id)
+        elif role == "superadmin":
+            pass
+        else:
+            return Response(
+                {"detail": "Ruxsat yo'q"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         serializer = CarImageSerializer(
             images,
             many=True,
@@ -2464,7 +2537,8 @@ class CarImageAPIView(APIView):
     )
     def post(self, request):
         user = request.user
-        if getattr(user, "role", None) not in ["admin", "manager"]:
+        role = getattr(user, "role", None)
+        if role not in ["admin", "manager", "superadmin"]:
             return Response(
                 {"detail": "You are not allowed to upload images"},
                 status=status.HTTP_403_FORBIDDEN
@@ -2475,18 +2549,38 @@ class CarImageAPIView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         car = serializer.validated_data.get("car")
-        if user.role == "admin" and car.company_id != user.id:
+        if not car:
             return Response(
-                {"detail": "Bu car sizning companyga tegishli emas"},
-                status=status.HTTP_403_FORBIDDEN
+                {"detail": "Car majburiy"},
+                status=status.HTTP_400_BAD_REQUEST
             )
-        if user.role == "manager" and car.company_id != user.company_id:
-            return Response(
-                {"detail": "Bu car sizning companyga tegishli emas"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        if role == "admin":
+            if car.company_id != user.id:
+                return Response(
+                    {"detail": "Bu car sizning companyga tegishli emas"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        elif role == "manager":
+            company_id = self.get_user_company_id(user)
+            if not company_id:
+                return Response(
+                    {"detail": "Manager company topilmadi"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            if car.company_id != company_id:
+                return Response(
+                    {"detail": "Bu car sizning companyga tegishli emas"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        car_image = serializer.save()
+        response_serializer = CarImageSerializer(
+            car_image,
+            context={"request": request}
+        )
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_201_CREATED
+        )
     
     
 class CarImageByCarAPIView(APIView):
@@ -2500,16 +2594,20 @@ class CarImageByCarAPIView(APIView):
                 {"detail": "Car topilmadi"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        images = CarImage.objects.filter(car=car)
+        images = CarImage.objects.filter(car=car).order_by("id")
         serializer = CarImageSerializer(
             images,
             many=True,
             context={"request": request}
         )
-        return Response({
-            "car_id": car.id,
-            "images": serializer.data
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "car_id": car.id,
+                "count": images.count(),
+                "images": serializer.data,
+            },
+            status=status.HTTP_200_OK
+        )
         
         
 class CarImageDeleteAPIView(APIView):
@@ -2632,4 +2730,115 @@ class CarModelListView(APIView):
         if brand_id:
             models = models.filter(brand_id=brand_id)
         serializer = CarModelSerializer(models, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    
+class StaffOrderDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = StaffOrderDetailSerializer
+
+    def get_base_queryset(self):
+        return Order.objects.all().order_by("-id")
+
+    def get_order_object(self, request, pk):
+        role = get_auth_role(request)
+        qs = self.get_base_queryset()
+
+        if role == "superadmin":
+            return qs.filter(id=pk).first()
+
+        if role == "admin":
+            company = get_auth_company(request)
+
+            if not company:
+                return None
+
+            # Agar Order modelda company field bo'lsa
+            try:
+                return qs.filter(id=pk, company=company).first()
+            except FieldError:
+                pass
+
+            # Agar Order companyni car orqali olsa
+            try:
+                return qs.filter(id=pk, car__company=company).first()
+            except FieldError:
+                pass
+
+            # Agar Order companyni manager orqali olsa
+            try:
+                return qs.filter(id=pk, manager__company=company).first()
+            except FieldError:
+                pass
+
+            return None
+
+        if role == "manager":
+            manager = get_auth_manager(request)
+
+            if not manager:
+                return None
+
+            company = getattr(manager, "company", None)
+
+            # Manager faqat o'ziga biriktirilgan orderni ko'rsin
+            try:
+                order = qs.filter(id=pk, manager=manager).first()
+                if order:
+                    return order
+            except FieldError:
+                pass
+
+            # Agar manager company ichidagi orderlarni ko'rishi kerak bo'lsa
+            if company:
+                try:
+                    return qs.filter(id=pk, company=company).first()
+                except FieldError:
+                    pass
+
+                try:
+                    return qs.filter(id=pk, car__company=company).first()
+                except FieldError:
+                    pass
+
+                try:
+                    return qs.filter(id=pk, manager__company=company).first()
+                except FieldError:
+                    pass
+
+            return None
+
+        return None
+
+    @swagger_auto_schema(
+        tags=["Order"],
+        operation_summary="Admin/Manager order detail",
+        operation_description=(
+            "Admin va manager uchun order detail. "
+            "Response ichida mijoz, mashina, to'lov ma'lumotlari "
+            "va mijozning avvalgi orderlari qaytadi."
+        ),
+    )
+    def get(self, request, pk):
+        role = get_auth_role(request)
+
+        if role not in ["superadmin", "admin", "manager"]:
+            return Response(
+                {"detail": "Ruxsat yo'q"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        order = self.get_order_object(request, pk)
+
+        if not order:
+            return Response(
+                {"detail": "Order topilmadi yoki sizga ruxsat yo'q"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = StaffOrderDetailSerializer(
+            order,
+            context={"request": request}
+        )
+
         return Response(serializer.data, status=status.HTTP_200_OK)

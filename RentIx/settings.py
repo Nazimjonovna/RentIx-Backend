@@ -75,6 +75,8 @@ SITE_ID = 1
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
+    "channels",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -84,7 +86,6 @@ INSTALLED_APPS = [
     'corsheaders',  
     'rest_framework',
     'drf_yasg',
-    'channels',
     'modeltranslation',
     #own app
     'user',
@@ -211,13 +212,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'RentIx.wsgi.application'
+ASGI_APPLICATION = "RentIx.asgi.application"
 
+REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("redis", 6379)],
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
         },
     },
 }
